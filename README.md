@@ -47,7 +47,7 @@ Add to `~/.claude/settings.json`:
 }
 ```
 
-Restart Claude Code. The 10 tools below appear under the `kdraigo` server.
+Restart Claude Code. The 11 tools below appear under the `kdraigo` server.
 
 ## Install the skill
 
@@ -94,7 +94,7 @@ kdraigo_mcp/
     config/                config.yaml loader
     auth/                  Ed25519 signer
     client/                signed HTTP + WS clients
-    tools/                 the 10 MCP tools, embedded SDK docs
+    tools/                 the 11 MCP tools, embedded SDK docs
   skills/                  open-source skill (canonical source)
 ```
 
