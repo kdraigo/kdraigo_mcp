@@ -1,14 +1,14 @@
 # kdraigo dev_sdk — Reference
 
-Go SDK for writing trading strategies that run against the kdraigo backtester or a live exchange. Module path: `github.com/kdraigo/flow_v1/dev_sdk`.
+Go SDK for writing trading strategies that run against the kdraigo backtester or a live exchange. Module path: `github.com/kdraigo/dev_sdk`.
 
 ## entry
 
 ```go
 import (
     "context"
-    sdk  "github.com/kdraigo/flow_v1/dev_sdk"
-    "github.com/kdraigo/flow_v1/dev_sdk/types"
+    sdk  "github.com/kdraigo/dev_sdk"
+    "github.com/kdraigo/dev_sdk/types"
 )
 
 s, err := sdk.New(&types.Config{...})
@@ -105,6 +105,108 @@ order, err := ctx.PlaceOrder(ctx.Ctx, &types.OrderRequest{
 
 `Reason` and `Logs` are forwarded to the backtester engine and persisted alongside the order. Use them — Claude can read them back via `get_session_detail` and explain trades after the fact.
 
+## indicators
+
+~95 TA-Lib indicators are computed per timeframe from the candles the SDK has streamed. Access them through the timeframe-scoped manager:
+
+```go
+import (
+    sdk "github.com/kdraigo/dev_sdk"
+    "github.com/kdraigo/dev_sdk/indicators"
+    "github.com/kdraigo/dev_sdk/types"
+)
+
+s.SetOnCandleFor(types.Timeframe1h, func(ctx *types.Context, c *types.Candle) {
+    calc := s.IndicatorManagerFor(types.Timeframe1h) // tf MUST be in Config.Timeframes
+
+    rsi, err := calc.RSI("binance", "BTC/USDT", "close", 14)
+    if err != nil {
+        return // not enough history yet — treat error as warm-up
+    }
+    latest := rsi[len(rsi)-1] // most recent value is the LAST element
+})
+```
+
+Every method: `IndicatorManagerFor(tf).<Name>(exchange, symbol string, <params...>) (<series...> []float64, error)`.
+
+Rules:
+
+- Register the timeframe in `Config.Timeframes`, then read it with `IndicatorManagerFor(tf)`.
+- Latest value is the **last** slice element: `series[len(series)-1]`. TA-Lib zero-fills the leading lookback region.
+- On insufficient data (`len(points) <= period`) or unknown exchange/symbol the call returns an error — return early, it means warm-up isn't finished.
+- `pt` (`pointType`) selects the input series for single-input indicators: `"close"` (default), `"open"`, `"high"`, `"low"`, `"volume"`. Indicators needing OHLC/HL/HLC/HLCV derive them internally and take **no** `pt`.
+- `maType` uses re-exported constants: `indicators.TypeSMA`, `TypeEMA`, `TypeWMA`, `TypeDEMA`, `TypeTEMA`, `TypeTRIMA`, `TypeKAMA`, `TypeMAMA`, `TypeT3MA`.
+
+Below, the leading `exchange, symbol` are omitted; `pt` = `pointType`; return is one `[]float64` + `error` unless noted.
+
+### Overlap / moving averages
+
+| Method | Params | Returns |
+|---|---|---|
+| `BB` | `pt, period int, deviation float64, maType` | upper, middle, lower |
+| `DEMA` `EMA` `KAMA` `SMA` `TEMA` `TRIMA` `WMA` | `pt, period int` | series |
+| `MA` | `pt, period int, maType` | series |
+| `MAMA` | `pt, fastLimit, slowLimit float64` | mama, fama |
+| `MaVp` | `pt, periods []float64, minPeriod, maxPeriod int, maType` | series |
+| `MidPoint` | `pt, period int` | series |
+| `MidPrice` | `period int` (HL) | series |
+| `T3` | `pt, period int, vFactor float64` | series |
+| `HTTrendline` | `pt` | series |
+| `SAR` | `acceleration, maximum float64` (HL) | series |
+| `SARExt` | 8 float64 SAR params (HL) | series |
+
+### Momentum
+
+| Method | Params | Returns |
+|---|---|---|
+| `ADX` `ADXR` `CCI` `DX` `MinusDI` `PlusDI` `WilliamsR` | `period int` (HLC) | series |
+| `MinusDM` `PlusDM` `AroonOsc` | `period int` (HL) | series |
+| `Aroon` | `period int` (HL) | aroonDown, aroonUp |
+| `MFI` | `period int` (HLCV) | series |
+| `BOP` | — (OHLC) | series |
+| `CMO` `Momentum` `RSI` `ROC` `ROCP` `ROCR` `ROCR100` `Trix` | `pt, period int` | series |
+| `APO` `PPO` | `pt, fastPeriod, slowPeriod int, maType` | series |
+| `MACD` | `pt, fastPeriod, slowPeriod, signalPeriod int` | macd, signal, hist |
+| `MACDExt` | `pt, fastPeriod int, fastMAType, slowPeriod int, slowMAType, signalPeriod int, signalMAType` | macd, signal, hist |
+| `MACDFix` | `pt, signalPeriod int` | macd, signal, hist |
+| `Stoch` | `fastKPeriod, slowKPeriod int, slowKMAType, slowDPeriod int, slowDMAType` (HLC) | slowK, slowD |
+| `StochF` | `fastKPeriod, fastDPeriod int, fastDMAType` (HLC) | fastK, fastD |
+| `StochRSI` | `pt, period, fastKPeriod, fastDPeriod int, fastDMAType` | fastK, fastD |
+| `UltOsc` | `period1, period2, period3 int` (HLC) | series |
+
+### Volume / volatility / price transform
+
+| Method | Params | Returns |
+|---|---|---|
+| `OBV` | `pt` (price+volume) | series |
+| `Ad` | — (HLCV) | series |
+| `AdOsc` | `fastPeriod, slowPeriod int` (HLCV) | series |
+| `ATR` `NATR` | `period int` (HLC) | series |
+| `TRANGE` | — (HLC) | series |
+| `AvgPrice` | — (OHLC) | series |
+| `MedPrice` | — (HL) | series |
+| `TypPrice` `WCLPrice` | — (HLC) | series |
+
+### Cycle (Hilbert Transform)
+
+| Method | Params | Returns |
+|---|---|---|
+| `HTDcPeriod` `HTDcPhase` `HTTrendMode` | `pt` | series |
+| `HTPhasor` | `pt` | inPhase, quadrature |
+| `HTSine` | `pt` | sine, leadSine |
+
+### Statistics
+
+| Method | Params | Returns |
+|---|---|---|
+| `LinearReg` `LinearRegAngle` `LinearRegIntercept` `LinearRegSlope` `TSF` `Var` | `pt, period int` | series |
+| `StdDev` | `pt, period int, nbDev float64` | series |
+| `Beta` `Correl` | `pt0, pt1, period int` | series |
+
+**Math** — element-wise transforms take `pt` only and return a series: `Acos` `Asin` `Atan` `Ceil` `Cos` `Cosh` `Exp` `Floor` `Ln` `Log10` `Sin` `Sinh` `Sqrt` `Tan` `Tanh`. Operators: `Add` `Sub` `Mult` `Div` (`pt0, pt1`); `Max` `Min` `MaxIndex` `MinIndex` `Sum` (`pt, period int`); `MinMax` `MinMaxIndex` (`pt, period int` → two series).
+
+Full reference with descriptions: `dev_sdk/indicators/README.md`.
+
 ## auth
 
 Strategies authenticate to the platform with the same Ed25519 keypair the MCP server uses. Set `KDRAIGO_KEY_ID` and `KDRAIGO_PRIVATE_KEY` in env; the scaffolded templates read them. Never commit either value.
@@ -113,4 +215,4 @@ Strategies authenticate to the platform with the same Ed25519 keypair the MCP se
 
 - `CancelOrder` WS round-trip in backtest engine: implemented; paper wallet cancel stamps `time.Now()` rather than simulated clock — determinism on cancel timestamps not yet guaranteed.
 - `IndicatorManager` only auto-updates from streamed candles. If you warm up via `GetCandles*`, feed the warmup candles into your indicators manually.
-- Only RSI is currently exposed via the `Indicator` interface; other talib indicators require direct calls.
+- The `ctx.GetIndicator(name)` string-map API (used with `Config.Indicators`) returns only a single pre-registered scalar. For the full TA-Lib surface use the `IndicatorManagerFor(tf)` methods documented under `## indicators` — those return the whole series and cover ~95 functions.
