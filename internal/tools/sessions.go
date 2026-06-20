@@ -30,9 +30,16 @@ func addListSessions(s *server.MCPServer, d Deps) {
 	add(s, tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		page := req.GetInt("page", 1)
 		perPage := req.GetInt("per_page", 20)
+		if page < 1 {
+			page = 1
+		}
+		if perPage < 1 {
+			perPage = 20
+		}
+		// frontend_api paginates by limit/offset, not page/per_page — translate.
 		q := url.Values{}
-		q.Set("page", strconv.Itoa(page))
-		q.Set("per_page", strconv.Itoa(perPage))
+		q.Set("limit", strconv.Itoa(perPage))
+		q.Set("offset", strconv.Itoa((page-1)*perPage))
 		body, status, err := d.HTTP.Do(ctx, true, client.HeaderStyleStandard, http.MethodGet, client.FrontendAPI, "/api/v1/dev/sessions", q, nil)
 		if err != nil {
 			return toolErr(err), nil
@@ -112,7 +119,8 @@ func addUpdateSessionMetadata(s *server.MCPServer, d Deps) {
 		}
 		if args := req.GetArguments(); args != nil {
 			if _, ok := args["favorite"]; ok {
-				payload["favorite"] = req.GetBool("favorite", false)
+				// frontend_api's DTO field is is_favorite, not favorite.
+				payload["is_favorite"] = req.GetBool("favorite", false)
 			}
 		}
 		body, status, err := d.HTTP.Do(ctx, true, client.HeaderStyleStandard, http.MethodPatch, client.FrontendAPI, "/api/v1/dev/sessions/"+id+"/metadata", nil, payload)

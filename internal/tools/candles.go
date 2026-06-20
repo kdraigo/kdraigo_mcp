@@ -18,8 +18,8 @@ func RegisterCandles(s *server.MCPServer, d Deps) {
 		mcp.WithString("exchange", mcp.Required(), mcp.Description("Exchange ID, e.g. binance or bybit")),
 		mcp.WithString("symbol", mcp.Required(), mcp.Description("Symbol, slash form e.g. BTC/USDT")),
 		mcp.WithString("timeframe", mcp.Required(), mcp.Description("Timeframe, e.g. 1m, 5m, 1h, 1d")),
-		mcp.WithString("from", mcp.Required(), mcp.Description("Start time, ISO 8601, e.g. 2026-01-01T00:00:00Z")),
-		mcp.WithString("to", mcp.Required(), mcp.Description("End time, ISO 8601, e.g. 2026-03-01T00:00:00Z")),
+		mcp.WithString("from", mcp.Required(), mcp.Description("Start time as Unix epoch MILLISECONDS, e.g. 1778803200000 (= 2026-05-15T00:00:00Z). Not seconds, not ISO 8601.")),
+		mcp.WithString("to", mcp.Required(), mcp.Description("End time as Unix epoch MILLISECONDS, e.g. 1778889600000 (= 2026-05-16T00:00:00Z). Not seconds, not ISO 8601.")),
 	)
 	add(s, tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		exchange, err := req.RequireString("exchange")
