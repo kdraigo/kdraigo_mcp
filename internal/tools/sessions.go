@@ -53,7 +53,7 @@ func addListSessions(s *server.MCPServer, d Deps) {
 
 func addGetSessionDetail(s *server.MCPServer, d Deps) {
 	tool := mcp.NewTool("get_session_detail",
-		mcp.WithDescription("Fetch a single session's metadata, orders, and analytics summary."),
+		mcp.WithDescription("Fetch a single session's metadata and wallet snapshots. Orders and analytics are served by separate endpoints/tools, not by this call."),
 		mcp.WithString("session_id", mcp.Required(), mcp.Description("Session UUID")),
 	)
 	add(s, tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

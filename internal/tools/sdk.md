@@ -91,19 +91,29 @@ Live adapters drop in-progress klines before they reach the SDK pipeline, so `On
 ## placing orders
 
 ```go
-order, err := ctx.PlaceOrder(ctx.Ctx, &types.OrderRequest{
+order, err := ctx.PlaceOrder(&types.OrderRequest{
+    Symbol:   "BTC/USDT",
     Exchange: "binance",
-    Asset:    "USDT",
-    Pair:     "BTC/USDT",
-    Side:     types.SideBuy,
-    Type:     types.OrderTypeMarket,
+    Side:     types.OrderSideBuy,    // or types.OrderSideSell
+    Type:     types.OrderTypeMarket, // or types.OrderTypeLimit (then set Price)
     Quantity: 0.01,
     Reason:   map[string]any{"signal": "rsi_oversold", "rsi": 28.4},
     Logs:     []string{"computed rsi=28.4 over 14 closes"},
 })
 ```
 
-`Reason` and `Logs` are forwarded to the backtester engine and persisted alongside the order. Use them — Claude can read them back via `get_session_detail` and explain trades after the fact.
+`ctx.PlaceOrder` takes a single `*types.OrderRequest`. The pair goes in `Symbol`
+(there is no `Asset`/`Pair` field); side/type are `types.OrderSideBuy/Sell` and
+`types.OrderTypeMarket/Limit` (set `Price` for limit orders).
+
+`Reason` and `Logs` are forwarded to the backtester engine and persisted alongside the order. Use them — they are returned by the orders endpoint/tool so a run can be reviewed and explained after the fact.
+
+### Short positions
+
+The backtest paper wallet supports shorts: a `SELL` that exceeds your current long
+position opens a short (it tracks an average short price and liquidation value).
+**Caveat:** live *spot* adapters cannot short — a short-based strategy that backtests
+cleanly may misbehave or be rejected when run live on a spot exchange.
 
 ## indicators
 
