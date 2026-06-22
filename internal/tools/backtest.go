@@ -155,12 +155,22 @@ func addRunBacktestStream(s *server.MCPServer, d Deps) {
 			if err := ws.Send(ctx, client.WSAction{Action: "next"}); err != nil {
 				return toolErr(fmt.Errorf("ws send: %w", err)), nil
 			}
-			resp, err := ws.Recv(ctx)
-			if err != nil {
-				return toolErr(fmt.Errorf("ws recv: %w", err)), nil
-			}
-			if resp.Status != "ok" {
-				return toolErr(fmt.Errorf("engine error: %s", resp.Error)), nil
+			// Read until the matching "next" response, skipping async keepalive/
+			// progress frames the engine pushes (~every 15s) so they aren't
+			// miscounted as candles.
+			var resp *client.WSResponse
+			for {
+				resp, err = ws.Recv(ctx)
+				if err != nil {
+					return toolErr(fmt.Errorf("ws recv: %w", err)), nil
+				}
+				if resp.Status != "ok" {
+					return toolErr(fmt.Errorf("engine error: %s", resp.Error)), nil
+				}
+				if resp.Action == "next" {
+					break
+				}
+				// progress / heartbeat — ignore and keep waiting for the tick.
 			}
 			var tp tickPayload
 			if err := json.Unmarshal(resp.Data, &tp); err != nil {
