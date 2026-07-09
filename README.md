@@ -47,15 +47,18 @@ Add to `~/.claude/settings.json`:
 }
 ```
 
-Restart Claude Code. The 11 tools below appear under the `kdraigo` server.
+Restart Claude Code. The 12 tools below appear under the `kdraigo` server.
 
-## Install the skill
+## Install the skills
 
 ```bash
 kdraigo-mcp install-skill
 ```
 
-This fetches [`skills/kdraigo-strategy.md`](skills/kdraigo-strategy.md) from this repo and writes it to `~/.claude/skills/`. Reload Claude Code to see `/kdraigo-strategy`.
+This fetches the skills below from this repo and writes them to `~/.claude/skills/`. Reload Claude Code to see them.
+
+- [`kdraigo-strategy`](skills/kdraigo-strategy.md) — the scaffold → backtest → analyze → iterate loop.
+- [`kdraigo-indicators`](skills/kdraigo-indicators.md) — choose the right technical indicator by intent and wire it via the SDK.
 
 ---
 
@@ -64,6 +67,7 @@ This fetches [`skills/kdraigo-strategy.md`](skills/kdraigo-strategy.md) from thi
 | Tool | What it does |
 | ---- | ------------ |
 | `get_sdk_docs` | Returns the embedded dev_sdk reference. Pass `section` to scope. |
+| `get_indicator_docs` | Deep per-indicator reference (purpose, calculation, signals, usage). Pass `name` to scope to one indicator or category. |
 | `scaffold_strategy` | `git clone`s a template from [`example_strategy`](https://github.com/kdraigo/example_strategy) into a target dir. |
 | `create_backtest_session` | POSTs `/api/v1/dev/session` on backtester_engine, returns a session ID. |
 | `run_backtest_stream` | Drives a session to completion via WS. Returns aggregate stats. |
@@ -94,8 +98,8 @@ kdraigo_mcp/
     config/                config.yaml loader
     auth/                  Ed25519 signer
     client/                signed HTTP + WS clients
-    tools/                 the 11 MCP tools, embedded SDK docs
-  skills/                  open-source skill (canonical source)
+    tools/                 the 12 MCP tools, embedded SDK + indicator docs
+  skills/                  open-source skills (canonical source)
 ```
 
 ## Templates
