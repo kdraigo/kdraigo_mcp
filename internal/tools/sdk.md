@@ -51,7 +51,7 @@ types.Config{
 
 Key types you will touch:
 
-- `types.Candle` — `Exchange`, `Symbol`, `Timeframe`, `OpenTime`, `CloseTime`, `Open/High/Low/Close/Volume`, `IsComplete`.
+- `types.Candle` — `Exchange`, `Symbol`, `Timeframe`, `OpenTime`, `CloseTime`, `Open/High/Low/Close/Volume`, `IsComplete`. `Volume` is the **base-asset** volume (there is no separate `BaseVolume` field). Plus order-flow metrics for Wyckoff / Composite-Man analysis: `TradeCount` (int64, number of trades), `QuoteVolume` (quote-asset turnover), `TakerBuyBaseVolume` and `TakerBuyQuoteVolume` (aggressive-buy pressure). These are **0 when the source exchange doesn't provide them** — Binance klines populate all of them; e.g. Bybit exposes `QuoteVolume` but not `TradeCount`/taker-buy splits. Guard on non-zero before relying on them.
 - `types.Order` — `ID`, `Side` (BUY/SELL), `Type` (MARKET/LIMIT), `Status` (NEW/PARTIALLY_FILLED/FILLED/CANCELED/REJECTED), `Price`, `Quantity`, `FilledQty`, `AveragePrice`.
 - `types.OrderRequest` — what you pass to `ctx.PlaceOrder`. Includes `Reason` (`map[string]any`) and `Logs` (`[]string`) for telemetry.
 - `types.Context` — provided to every callback; exposes `PlaceOrder`, `CancelOrder`, `Now`, `GetIndicator`, the `Config`, and the `Trader` (paper or live).

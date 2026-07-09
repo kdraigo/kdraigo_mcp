@@ -99,6 +99,12 @@ stop := entryPrice - 2*atr[i]
 ### "Is volume confirming the move?"
 - `OBV`, `Ad` (A/D line), `AdOsc` (A/D momentum). Rising with price = confirmation;
   divergence = the move lacks participation.
+- **Raw order-flow on the candle** (no indicator needed): each `types.Candle`
+  carries `TradeCount`, `QuoteVolume`, `TakerBuyBaseVolume`, `TakerBuyQuoteVolume`.
+  Use `TakerBuyBaseVolume / Volume` for aggressive-buy ratio, or high volume with
+  low `TradeCount` to spot institutional ("Composite Man") prints vs. retail.
+  These are populated by Binance but **0 on exchanges that don't provide them** —
+  guard on non-zero first.
 
 ### "Where's the channel / support-resistance?"
 - `Max`/`Min`/`MinMax` over a period (Donchian-style channel), `MidPrice`,
