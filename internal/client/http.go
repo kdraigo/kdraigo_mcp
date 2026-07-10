@@ -19,7 +19,11 @@ import (
 type ServicePrefix string
 
 const (
-	Backtester  ServicePrefix = "/backtester"
+	// Backtester routes directly to the backtester_engine host (api.kdraigo.com),
+	// which forwards /api/v1/dev/* verbatim — no gateway prefix. The kdraigo.com
+	// gateway has no /backtester location and 405s the session POST (falls through
+	// to the SPA static handler), so the backtester uses its own base URL.
+	Backtester  ServicePrefix = ""
 	FrontendAPI ServicePrefix = "/frontend-api"
 	Analytics   ServicePrefix = "/analytics"
 	Data        ServicePrefix = "/data"
@@ -30,26 +34,39 @@ const (
 type HeaderStyle int
 
 const (
-	HeaderStyleStandard  HeaderStyle = iota // X-Key-ID / X-Signature / X-Timestamp
-	HeaderStyleBacktester                   // X-API-KEY / X-SIGNATURE / X-TIMESTAMP
+	HeaderStyleStandard   HeaderStyle = iota // X-Key-ID / X-Signature / X-Timestamp
+	HeaderStyleBacktester                    // X-API-KEY / X-SIGNATURE / X-TIMESTAMP
 )
 
 type HTTP struct {
-	endpoint string
-	signer   *auth.Signer
-	hc       *http.Client
+	endpoint           string
+	backtesterEndpoint string
+	signer             *auth.Signer
+	hc                 *http.Client
 }
 
-func NewHTTP(endpoint string, signer *auth.Signer) *HTTP {
+func NewHTTP(endpoint, backtesterEndpoint string, signer *auth.Signer) *HTTP {
 	return &HTTP{
-		endpoint: strings.TrimRight(endpoint, "/"),
-		signer:   signer,
-		hc:       &http.Client{Timeout: 60 * time.Second},
+		endpoint:           strings.TrimRight(endpoint, "/"),
+		backtesterEndpoint: strings.TrimRight(backtesterEndpoint, "/"),
+		signer:             signer,
+		hc:                 &http.Client{Timeout: 60 * time.Second},
 	}
 }
 
-// Endpoint returns the configured base URL (used by the WS client).
+// Endpoint returns the gateway base URL (data/analytics/frontend-api services).
 func (h *HTTP) Endpoint() string { return h.endpoint }
+
+// BacktesterEndpoint returns the backtester_engine base URL (used by the WS client).
+func (h *HTTP) BacktesterEndpoint() string { return h.backtesterEndpoint }
+
+// baseFor picks the correct base URL for a service prefix.
+func (h *HTTP) baseFor(svc ServicePrefix) string {
+	if svc == Backtester {
+		return h.backtesterEndpoint
+	}
+	return h.endpoint
+}
 
 // Signer exposes the configured Ed25519 signer.
 func (h *HTTP) Signer() *auth.Signer { return h.signer }
@@ -59,7 +76,7 @@ func (h *HTTP) Signer() *auth.Signer { return h.signer }
 // `signed=false` skips auth headers (for data_provider).
 // `query` may be nil. `body` may be nil.
 func (h *HTTP) Do(ctx context.Context, signed bool, style HeaderStyle, method string, svc ServicePrefix, path string, query url.Values, body any) ([]byte, int, error) {
-	full := h.endpoint + string(svc) + path
+	full := h.baseFor(svc) + string(svc) + path
 	if query != nil && len(query) > 0 {
 		full += "?" + query.Encode()
 	}

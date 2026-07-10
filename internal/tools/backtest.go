@@ -140,7 +140,7 @@ func addRunBacktestStream(s *server.MCPServer, d Deps) {
 		}
 		maxCandles := req.GetInt("max_candles", 0)
 
-		ws, err := client.DialSessionWS(ctx, d.HTTP.Endpoint(), d.HTTP.Signer(), sessionID)
+		ws, err := client.DialSessionWS(ctx, d.HTTP.BacktesterEndpoint(), d.HTTP.Signer(), sessionID)
 		if err != nil {
 			return toolErr(err), nil
 		}

@@ -12,7 +12,13 @@ Transport is **stdio** — the binary is launched as a subprocess by your MCP cl
 go install github.com/kdraigo/kdraigo_mcp/cmd/kdraigo-mcp@latest
 ```
 
-Verify:
+Or, from a clone, build with the version stamped from the git tag:
+
+```bash
+make install
+```
+
+Verify (should print the git tag, not `dev`):
 
 ```bash
 kdraigo-mcp version

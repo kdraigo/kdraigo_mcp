@@ -84,9 +84,20 @@ In backtest, `to` must not exceed `ctx.Now()` — the engine rejects future fetc
 | `SetOnCandle(fn)` | Every **closed** candle across all timeframes |
 | `SetOnCandleFor(tf, fn)` | Closed candle on a specific timeframe only |
 | `SetOnOrderUpdate(fn)` | Order status change |
-| `SetOnComplete(fn)` | Backtest finished (no-op in live) |
+| `SetOnComplete(fn)` | Backtest finished **cleanly** (reached `done`); no-op in live |
+| `SetOnError(fn)` | Backtest ended in a terminal error (e.g. truncated stream) |
 
 Live adapters drop in-progress klines before they reach the SDK pipeline, so `OnCandle` fires exactly once per close. In backtest the engine only emits closed historical candles.
+
+### completion vs. error
+
+`SetOnComplete` fires only when the candle stream ends cleanly (the engine sent
+`done:true`). If the websocket drops mid-run, the SDK now surfaces a **terminal
+error** instead: `SetOnError` fires (if set), `SetOnComplete` does **not**, and
+`Start(ctx)` returns a non-nil error. A truncated run is therefore no longer
+mistaken for a finished one. Prefer checking `Start`'s return value over relying on
+`OnComplete` alone; you can still count bars and compare the last bar timestamp
+against `BacktestOptions.EndTime` as a belt-and-suspenders coverage check.
 
 ## placing orders
 
@@ -107,6 +118,23 @@ order, err := ctx.PlaceOrder(&types.OrderRequest{
 `types.OrderTypeMarket/Limit` (set `Price` for limit orders).
 
 `Reason` and `Logs` are forwarded to the backtester engine and persisted alongside the order. Use them — they are returned by the orders endpoint/tool so a run can be reviewed and explained after the fact.
+
+### fill semantics in backtest
+
+Market orders fill **synchronously**: `PlaceOrder` returns an already-`FILLED`
+order priced at the **current candle's close** (`paper_wallet.go` →
+`CreateOrderMarket`). Limit orders fill at the limit price. Taker fees are deducted
+from the quote balance (reported on the order as `Fee`).
+
+The returned order now populates `AveragePrice`, `FilledQty`, `ID` and `Symbol`
+for a filled order (`AveragePrice == Price`, `FilledQty == Quantity`). Filled orders
+are *also* re-dispatched asynchronously to `SetOnOrderUpdate` on the following tick,
+so make order handling **idempotent** (dedupe on `order.ID`).
+
+There is no resting stop/take-profit order type — simulate stops strategy-side.
+Because a market order can only fill at the bar close, evaluate stop/target triggers
+**on the close**, not the bar's high/low; an intrabar trigger books a fill at a
+price the position never actually obtained.
 
 ### Short positions
 
@@ -146,6 +174,38 @@ Rules:
 - On insufficient data (`len(points) <= period`) or unknown exchange/symbol the call returns an error — return early, it means warm-up isn't finished.
 - `pt` (`pointType`) selects the input series for single-input indicators: `"close"` (default), `"open"`, `"high"`, `"low"`, `"volume"`. Indicators needing OHLC/HL/HLC/HLCV derive them internally and take **no** `pt`.
 - `maType` uses re-exported constants: `indicators.TypeSMA`, `TypeEMA`, `TypeWMA`, `TypeDEMA`, `TypeTEMA`, `TypeTRIMA`, `TypeKAMA`, `TypeMAMA`, `TypeT3MA`.
+
+### warm-up (skip the ramp-up period)
+
+By default indicators only see candles the SDK has streamed, so early bars return
+errors until enough history accumulates. To get real values on the **first** bar,
+fetch history with `GetCandles` — the fetched range is **fed into the SDK's own
+indicator manager** for that timeframe automatically:
+
+```go
+primed := false
+s.SetOnCandleFor(types.Timeframe1h, func(ctx *types.Context, c *types.Candle) {
+    if !primed {
+        // Fetching history primes IndicatorManagerFor(tf) for this timeframe.
+        // Do it once, from the first callback.
+        if _, err := s.GetCandles(ctx.Ctx, "binance", "BTC/USDT", 300, types.Timeframe1h); err != nil {
+            log.Printf("warmup fetch: %v", err)
+        }
+        primed = true
+    }
+    atr, err := s.IndicatorManagerFor(types.Timeframe1h).ATR("binance", "BTC/USDT", 14)
+    // ... atr is populated on the very first bar
+})
+```
+
+`GetCandles`/`GetCandlesFromTo` feed the same manager `IndicatorManagerFor(tf)` reads
+from — you do **not** need to construct your own `indicators.NewIndicatorManager`. The
+manager keys points by candle OpenTime and de-duplicates, so this is **idempotent**:
+fetching overlapping ranges, or a bar already streamed in, replaces the point rather
+than duplicating it — history is never corrupted no matter how often you call it. No
+look-ahead: in backtest the fetch is a pure read served by the engine, which rejects
+any range past the simulated clock — so a session can start trading on the first bar
+instead of burning a warm-up window with orders suppressed.
 
 Below, the leading `exchange, symbol` are omitted; `pt` = `pointType`; return is one `[]float64` + `error` unless noted.
 
@@ -221,8 +281,16 @@ Full reference with descriptions: `dev_sdk/indicators/README.md`.
 
 Strategies authenticate to the platform with the same Ed25519 keypair the MCP server uses. Set `KDRAIGO_KEY_ID` and `KDRAIGO_PRIVATE_KEY` in env; the scaffolded templates read them. Never commit either value.
 
+## endpoints
+
+`BacktestOptions.Endpoint` is the **backtester_engine** base URL:
+`https://api.kdraigo.com` for the hosted engine, or `http://localhost:4000` for a
+local one. This is **not** the `endpoint:` in `~/.kdraigo/config.yaml` — that is the
+MCP gateway base (`https://kdraigo.com`) for the data/analytics tools. The
+backtester is a separate host: the `kdraigo.com` gateway does not proxy it (the
+session POST 405s), so the SDK and MCP target `api.kdraigo.com` directly.
+
 ## known gaps
 
 - `CancelOrder` WS round-trip in backtest engine: implemented; paper wallet cancel stamps `time.Now()` rather than simulated clock — determinism on cancel timestamps not yet guaranteed.
-- `IndicatorManager` only auto-updates from streamed candles. If you warm up via `GetCandles*`, feed the warmup candles into your indicators manually.
 - The `ctx.GetIndicator(name)` string-map API (used with `Config.Indicators`) returns only a single pre-registered scalar. For the full TA-Lib surface use the `IndicatorManagerFor(tf)` methods documented under `## indicators` — those return the whole series and cover ~95 functions.

@@ -12,7 +12,10 @@ import (
 	"github.com/kdraigo/kdraigo_mcp/internal/tools"
 )
 
-const version = "0.1.0"
+// version is stamped at build time via -ldflags "-X main.version=<tag>" (see
+// Makefile). It defaults to "dev" for `go run`/`go build` without ldflags so it
+// can never silently drift from a hardcoded constant again (D7).
+var version = "dev"
 
 func main() {
 	if len(os.Args) > 1 {
@@ -42,7 +45,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "signer:", err)
 		os.Exit(1)
 	}
-	httpClient := client.NewHTTP(cfg.Endpoint, signer)
+	httpClient := client.NewHTTP(cfg.Endpoint, cfg.BacktesterEndpoint, signer)
 	deps := tools.Deps{HTTP: httpClient}
 
 	s := server.NewMCPServer("kdraigo", version)
@@ -73,5 +76,6 @@ Configuration:
     auth:
       key_id: <uuid>
       private_key: <ed25519-hex>
-    endpoint: https://kdraigo.com   # optional; this is the default`)
+    endpoint: https://kdraigo.com              # optional; gateway for data/analytics
+    backtester_endpoint: https://api.kdraigo.com  # optional; backtester_engine host`)
 }

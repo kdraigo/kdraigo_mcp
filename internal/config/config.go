@@ -8,9 +8,19 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const (
+	defaultEndpoint           = "https://kdraigo.com"
+	defaultBacktesterEndpoint = "https://api.kdraigo.com"
+)
+
 type Config struct {
-	Auth     AuthConfig `yaml:"auth"`
-	Endpoint string     `yaml:"endpoint"`
+	Auth AuthConfig `yaml:"auth"`
+	// Endpoint is the gateway base for data/analytics/frontend-api services.
+	Endpoint string `yaml:"endpoint"`
+	// BacktesterEndpoint is the backtester_engine base. It is a separate host
+	// because the kdraigo.com gateway does not proxy the backtester (session POST
+	// 405s); api.kdraigo.com forwards /api/v1/dev/* directly to the engine.
+	BacktesterEndpoint string `yaml:"backtester_endpoint"`
 }
 
 type AuthConfig struct {
@@ -33,7 +43,7 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 
-	cfg := &Config{Endpoint: "https://kdraigo.com"}
+	cfg := &Config{Endpoint: defaultEndpoint, BacktesterEndpoint: defaultBacktesterEndpoint}
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
@@ -42,7 +52,10 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("%s: auth.key_id and auth.private_key are required", path)
 	}
 	if cfg.Endpoint == "" {
-		cfg.Endpoint = "https://kdraigo.com"
+		cfg.Endpoint = defaultEndpoint
+	}
+	if cfg.BacktesterEndpoint == "" {
+		cfg.BacktesterEndpoint = defaultBacktesterEndpoint
 	}
 	return cfg, nil
 }

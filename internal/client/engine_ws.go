@@ -36,8 +36,8 @@ type SessionWS struct {
 	conn *websocket.Conn
 }
 
-// DialSessionWS opens an authenticated WS to backtester_engine via the kdraigo.com gateway.
-// `endpoint` should be the configured https/http base; the scheme is rewritten to ws(s).
+// DialSessionWS opens an authenticated WS to backtester_engine.
+// `endpoint` should be the backtester base (api.kdraigo.com); the scheme is rewritten to ws(s).
 func DialSessionWS(ctx context.Context, endpoint string, signer *auth.Signer, sessionID string) (*SessionWS, error) {
 	// Canonical signed path: /api/v1/dev/session/ws (upstream path, post-prefix-strip).
 	const wsPath = "/api/v1/dev/session/ws"
