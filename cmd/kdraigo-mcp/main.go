@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime/debug"
 
 	"github.com/mark3labs/mcp-go/server"
 
@@ -12,10 +13,23 @@ import (
 	"github.com/kdraigo/kdraigo_mcp/internal/tools"
 )
 
-// version is stamped at build time via -ldflags "-X main.version=<tag>" (see
-// Makefile). It defaults to "dev" for `go run`/`go build` without ldflags so it
-// can never silently drift from a hardcoded constant again (D7).
-var version = "dev"
+// version may be stamped at build time via -ldflags "-X main.version=<tag>" (see
+// Makefile). Left unset it resolves from the module version Go embeds in the
+// binary, so `go install github.com/kdraigo/kdraigo_mcp/...@latest` reports the
+// real release tag automatically — no hardcoded constant to drift (D7).
+var version = ""
+
+// resolveVersion prefers an explicit ldflags stamp, else the module version Go
+// records at install time (e.g. "v1.0.4"), else a dev fallback.
+func resolveVersion() string {
+	if version != "" {
+		return version
+	}
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+	return "dev"
+}
 
 func main() {
 	if len(os.Args) > 1 {
@@ -27,7 +41,7 @@ func main() {
 			}
 			return
 		case "version", "-v", "--version":
-			fmt.Println("kdraigo-mcp", version)
+			fmt.Println("kdraigo-mcp", resolveVersion())
 			return
 		case "help", "-h", "--help":
 			printHelp()
@@ -48,7 +62,7 @@ func main() {
 	httpClient := client.NewHTTP(cfg.Endpoint, cfg.BacktesterEndpoint, signer)
 	deps := tools.Deps{HTTP: httpClient}
 
-	s := server.NewMCPServer("kdraigo", version)
+	s := server.NewMCPServer("kdraigo", resolveVersion())
 	tools.RegisterDocs(s)
 	tools.RegisterScaffold(s)
 	tools.RegisterSessions(s, deps)
