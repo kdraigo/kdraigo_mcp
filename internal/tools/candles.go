@@ -17,7 +17,7 @@ func RegisterCandles(s *server.MCPServer, d Deps) {
 		mcp.WithDescription("Fetch OHLCV candles from data_provider. Public endpoint, no auth required."),
 		mcp.WithString("exchange", mcp.Required(), mcp.Description("Exchange ID, e.g. binance or bybit")),
 		mcp.WithString("symbol", mcp.Required(), mcp.Description("Symbol, slash form e.g. BTC/USDT")),
-		mcp.WithString("timeframe", mcp.Required(), mcp.Description("Timeframe, e.g. 1m, 5m, 1h, 1d")),
+		mcp.WithString("timeframe", mcp.Required(), mcp.Description("Timeframe. One of: 1m, 2m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 1d, 1w, 1M. Case-sensitive: 1m is one minute, 1M is one month. Anything else is rejected with HTTP 400 — it is not silently served as 1m data.")),
 		mcp.WithString("from", mcp.Required(), mcp.Description("Start time as Unix epoch MILLISECONDS, e.g. 1778803200000 (= 2026-05-15T00:00:00Z). Not seconds, not ISO 8601.")),
 		mcp.WithString("to", mcp.Required(), mcp.Description("End time as Unix epoch MILLISECONDS, e.g. 1778889600000 (= 2026-05-16T00:00:00Z). Not seconds, not ISO 8601.")),
 	)

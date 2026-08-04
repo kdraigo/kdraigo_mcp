@@ -55,7 +55,11 @@ Key types you will touch:
 - `types.Order` — `ID`, `Side` (BUY/SELL), `Type` (MARKET/LIMIT), `Status` (NEW/PARTIALLY_FILLED/FILLED/CANCELED/REJECTED), `Price`, `Quantity`, `FilledQty`, `AveragePrice`.
 - `types.OrderRequest` — what you pass to `ctx.PlaceOrder`. Includes `Reason` (`map[string]any`) and `Logs` (`[]string`) for telemetry.
 - `types.Context` — provided to every callback; exposes `PlaceOrder`, `CancelOrder`, `Now`, `GetIndicator`, the `Config`, and the `Trader` (paper or live).
-- `types.Timeframe` — string-backed; constants `Timeframe1m`, `Timeframe5m`, `Timeframe15m`, `Timeframe30m`, `Timeframe1h`, `Timeframe2h`, `Timeframe4h`, `Timeframe1d`.
+- `types.Timeframe` — string-backed; constants `Timeframe1m`, `Timeframe3m`, `Timeframe5m`, `Timeframe15m`, `Timeframe30m`, `Timeframe1h`, `Timeframe2h`, `Timeframe4h`, `Timeframe1d`.
+  All of these are now genuinely aggregated server-side. Previously `3m`, `30m` and `2h` were
+  accepted but silently served as **1-minute** data, so any strategy calibrated on them before
+  2026-08 was computing on the wrong bars. An unsupported timeframe is now a hard error rather
+  than a silent downgrade.
 
 ## clock
 
