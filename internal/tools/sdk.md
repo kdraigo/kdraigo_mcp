@@ -52,10 +52,14 @@ types.Config{
 Key types you will touch:
 
 - `types.Candle` — `Exchange`, `Symbol`, `Timeframe`, `OpenTime`, `CloseTime`, `Open/High/Low/Close/Volume`, `IsComplete`. `Volume` is the **base-asset** volume (there is no separate `BaseVolume` field). Plus order-flow metrics for Wyckoff / Composite-Man analysis: `TradeCount` (int64, number of trades), `QuoteVolume` (quote-asset turnover), `TakerBuyBaseVolume` and `TakerBuyQuoteVolume` (aggressive-buy pressure). These are **0 when the source exchange doesn't provide them** — Binance klines populate all of them; e.g. Bybit exposes `QuoteVolume` but not `TradeCount`/taker-buy splits. Guard on non-zero before relying on them.
-- `types.Order` — `ID`, `Side` (BUY/SELL), `Type` (MARKET/LIMIT), `Status` (NEW/PARTIALLY_FILLED/FILLED/CANCELED/REJECTED), `Price`, `Quantity`, `FilledQty`, `AveragePrice`.
-- `types.OrderRequest` — what you pass to `ctx.PlaceOrder`. Includes `Reason` (`map[string]any`) and `Logs` (`[]string`) for telemetry.
+- `types.Order` — `ID`, `Side` (BUY/SELL), `Type` (MARKET/LIMIT/STOP_LOSS/STOP_LOSS_LIMIT/TAKE_PROFIT_LIMIT), `Status` (NEW/PARTIALLY_FILLED/FILLED/CANCELED/REJECTED), `Price`, `Quantity`, `FilledQty`, `AveragePrice`, plus `StopPrice` and `GroupID` for bracket legs (`GroupID` is shared by the two legs of a bracket, empty otherwise).
+- `types.OrderRequest` — what you pass to `ctx.PlaceOrder`. Includes `StopPrice` (trigger for stop orders) plus `Reason` (`map[string]any`) and `Logs` (`[]string`) for telemetry.
 - `types.Context` — provided to every callback; exposes `PlaceOrder`, `CancelOrder`, `Now`, `GetIndicator`, the `Config`, and the `Trader` (paper or live).
-- `types.Timeframe` — string-backed; constants `Timeframe1m`, `Timeframe5m`, `Timeframe15m`, `Timeframe30m`, `Timeframe1h`, `Timeframe2h`, `Timeframe4h`, `Timeframe1d`.
+- `types.Timeframe` — string-backed; constants `Timeframe1m`, `Timeframe3m`, `Timeframe5m`, `Timeframe15m`, `Timeframe30m`, `Timeframe1h`, `Timeframe2h`, `Timeframe4h`, `Timeframe1d`.
+  All of these are now genuinely aggregated server-side. Previously `3m`, `30m` and `2h` were
+  accepted but silently served as **1-minute** data, so any strategy calibrated on them before
+  2026-08 was computing on the wrong bars. An unsupported timeframe is now a hard error rather
+  than a silent downgrade.
 
 ## clock
 
@@ -114,8 +118,14 @@ order, err := ctx.PlaceOrder(&types.OrderRequest{
 ```
 
 `ctx.PlaceOrder` takes a single `*types.OrderRequest`. The pair goes in `Symbol`
-(there is no `Asset`/`Pair` field); side/type are `types.OrderSideBuy/Sell` and
-`types.OrderTypeMarket/Limit` (set `Price` for limit orders).
+(there is no `Asset`/`Pair` field); side is `types.OrderSideBuy/Sell`.
+
+Order types: `OrderTypeMarket`, `OrderTypeLimit` (set `Price`), `OrderTypeStopLoss`
+(set `StopPrice`; books at the trigger), `OrderTypeStopLossLimit` (set `StopPrice`
+*and* `Price`), and `OrderTypeTakeProfitLimit`. Stops work on both sides: a SELL stop
+triggers when the bar trades at or below `StopPrice`, a BUY stop at or above — so a
+short's protective stop is expressible. **An unknown order type is rejected**; it
+previously became a plain limit order, which behaves as the opposite of a stop.
 
 `Reason` and `Logs` are forwarded to the backtester engine and persisted alongside the order. Use them — they are returned by the orders endpoint/tool so a run can be reviewed and explained after the fact.
 
@@ -131,10 +141,52 @@ for a filled order (`AveragePrice == Price`, `FilledQty == Quantity`). Filled or
 are *also* re-dispatched asynchronously to `SetOnOrderUpdate` on the following tick,
 so make order handling **idempotent** (dedupe on `order.ID`).
 
-There is no resting stop/take-profit order type — simulate stops strategy-side.
-Because a market order can only fill at the bar close, evaluate stop/target triggers
-**on the close**, not the bar's high/low; an intrabar trigger books a fill at a
-price the position never actually obtained.
+Resting stop orders fill **intrabar**, not on the close: a SELL stop triggers on the
+bar's low, a BUY stop on its high. There is no longer any reason to simulate stops
+strategy-side, and doing so is now less accurate than placing a real one.
+
+A stop that **gapped through** its trigger books the bar's open rather than the stop
+price, because the stop price was never available once the order was live. Disable
+this with `Simulation.GapFills = false` if you need the old behaviour.
+
+When a single bar's range contains several resting orders — a stop *and* a
+take-profit, say — the **fill policy** decides which fills first. It defaults to
+`pessimistic` (the adverse one), which never flatters a result. `optimistic` and
+`creation_order` exist mainly so the difference can be measured;
+`creation_order` reproduces results produced before the policy existed.
+
+### brackets
+
+`SDK.PlaceBracket` places a take-profit and a protective stop as a **mutually
+cancelling pair** sharing one fund reservation: when either fills, the other is
+cancelled, and both legs are persisted so the outcome is auditable.
+
+It is a *pair*, not a ladder. The paper wallet reserves funds per order, so several
+independent take-profits against one position cannot rest simultaneously — the second
+returns `INSUFFICIENT_FUNDS`. A strategy that wants a laddered exit should place
+bracket 1 for the first tranche, then re-bracket the remainder when it fills. For a
+bar-driven backtest the difference is nil.
+
+Live adapters do not implement brackets and return `dev_sdk.ErrUnsupportedByAdapter`;
+check for it if your strategy is meant to run in both modes.
+
+### fees and the fill model
+
+Backtests now charge fees by default (0.1% maker and taker, Binance spot). **Every
+session recorded before 2026-08 ran fee-free**, so historical results are not
+comparable to new ones — at 500 round trips a 0.1% taker fee is 100% of turnover
+notional. Override via `Backtest.Simulation`:
+
+```go
+Simulation: &types.SimulationOptions{
+    FillPolicy: "pessimistic",   // or "optimistic" / "creation_order"
+    TakerFee:   ptr(0.001),      // pointer: nil means default, 0 means genuinely free
+},
+```
+
+The resolved fill policy, gap-fill setting and both fees are stored on the session
+row, so any stored result can be read back together with the assumptions that
+produced it.
 
 ### Short positions
 
@@ -292,5 +344,5 @@ session POST 405s), so the SDK and MCP target `api.kdraigo.com` directly.
 
 ## known gaps
 
-- `CancelOrder` WS round-trip in backtest engine: implemented; paper wallet cancel stamps `time.Now()` rather than simulated clock — determinism on cancel timestamps not yet guaranteed.
+- `CancelOrder` WS round-trip in backtest engine: implemented, and cancel timestamps now come from the simulated clock, so two runs over identical input produce an identical order log.
 - The `ctx.GetIndicator(name)` string-map API (used with `Config.Indicators`) returns only a single pre-registered scalar. For the full TA-Lib surface use the `IndicatorManagerFor(tf)` methods documented under `## indicators` — those return the whole series and cover ~95 functions.

@@ -49,7 +49,7 @@ func addCreateBacktestSession(s *server.MCPServer, d Deps) {
 		mcp.WithDescription("Create a backtest session on the backtester_engine. Returns the session id used by run_backtest_stream."),
 		mcp.WithString("exchange", mcp.Required(), mcp.Description("Exchange ID, e.g. binance or bybit")),
 		mcp.WithString("pair", mcp.Required(), mcp.Description("Trading pair, slash form, e.g. BTC/USDT")),
-		mcp.WithString("timeframe", mcp.Required(), mcp.Description("Candle timeframe, e.g. 1m, 1h, 1d")),
+		mcp.WithString("timeframe", mcp.Required(), mcp.Description("Candle timeframe. One of: 1m, 2m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 1d, 1w, 1M. Case-sensitive: 1m is one minute, 1M is one month.")),
 		mcp.WithString("from", mcp.Required(), mcp.Description("Start time ISO 8601, e.g. 2026-01-01T00:00:00Z")),
 		mcp.WithString("to", mcp.Required(), mcp.Description("End time ISO 8601, e.g. 2026-03-01T00:00:00Z")),
 		mcp.WithString("asset", mcp.Required(), mcp.Description("Initial wallet quote asset, e.g. USDT")),
