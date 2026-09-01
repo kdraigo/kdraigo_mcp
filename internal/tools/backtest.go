@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -31,29 +32,60 @@ type streamConfig struct {
 	To        time.Time `json:"to"`
 }
 
-// initialWallet matches entity.Wallet on the backtester side (it relies on default
-// case-insensitive JSON matching since the struct has no json tags).
+// initialWallet mirrors the engine's dev.InitialWalletRequest, tag for tag.
+//
+// The names are not cosmetic. That DTO uses snake_case json tags, and Go's
+// case-insensitive field matching does not cross underscores: "Exchange" binds
+// to `exchange` by luck, but "MarketType" would never bind to `market_type` —
+// it would decode as empty, and the session would silently run as spot on
+// perpetual data. The engine's own DTO carries a comment warning about exactly
+// this. Copy its tags rather than relying on the matcher.
 type initialWallet struct {
-	Exchange string  `json:"Exchange"`
-	Asset    string  `json:"Asset"`
-	Balance  float64 `json:"Balance"`
+	Exchange string  `json:"exchange"`
+	Asset    string  `json:"asset"`
+	Balance  float64 `json:"balance"`
+
+	// MarketType is "spot" (the default) or "linear_perp" for USDT-margined
+	// perpetuals; Leverage is the starting leverage for a perp wallet. Both
+	// omitempty, so a spot session's payload is byte-identical to before.
+	MarketType string  `json:"market_type,omitempty"`
+	Leverage   float64 `json:"leverage,omitempty"`
+}
+
+// simulationOptions mirrors the engine's simulation block. Pointers throughout
+// so "not specified" stays distinguishable from "explicitly zero" — asking for
+// no funding is a real, meaningful request, and it is not the same as saying
+// nothing.
+type simulationOptions struct {
+	MarginMode           string  `json:"margin_mode,omitempty"`
+	PositionMode         string  `json:"position_mode,omitempty"`
+	MarkPriceSource      string  `json:"mark_price_source,omitempty"`
+	ContractSpecsVersion string  `json:"contract_specs_version,omitempty"`
+	FundingEnabled       *bool   `json:"funding_enabled,omitempty"`
+	DefaultLeverage      float64 `json:"default_leverage,omitempty"`
 }
 
 type createSessionBody struct {
-	Streams        []streamConfig  `json:"streams"`
-	InitialWallets []initialWallet `json:"initial_wallets"`
+	Streams        []streamConfig     `json:"streams"`
+	InitialWallets []initialWallet    `json:"initial_wallets"`
+	Simulation     *simulationOptions `json:"simulation,omitempty"`
 }
 
 func addCreateBacktestSession(s *server.MCPServer, d Deps) {
 	tool := mcp.NewTool("create_backtest_session",
 		mcp.WithDescription("Create a backtest session on the backtester_engine. Returns the session id used by run_backtest_stream."),
-		mcp.WithString("exchange", mcp.Required(), mcp.Description("Exchange ID, e.g. binance or bybit")),
+		mcp.WithString("exchange", mcp.Required(), mcp.Description("Exchange ID. Spot: binance, bybit. Perpetual futures: binance_futures, bybit_futures — these are separate exchanges with their own candle data, funding rates and margin ladders, not a mode of the spot ones.")),
 		mcp.WithString("pair", mcp.Required(), mcp.Description("Trading pair, slash form, e.g. BTC/USDT")),
 		mcp.WithString("timeframe", mcp.Required(), mcp.Description("Candle timeframe. One of: 1m, 2m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 1d, 1w, 1M. Case-sensitive: 1m is one minute, 1M is one month.")),
 		mcp.WithString("from", mcp.Required(), mcp.Description("Start time ISO 8601, e.g. 2026-01-01T00:00:00Z")),
 		mcp.WithString("to", mcp.Required(), mcp.Description("End time ISO 8601, e.g. 2026-03-01T00:00:00Z")),
 		mcp.WithString("asset", mcp.Required(), mcp.Description("Initial wallet quote asset, e.g. USDT")),
 		mcp.WithNumber("initial_balance", mcp.Required(), mcp.Description("Initial wallet balance in the given asset")),
+		mcp.WithString("market_type", mcp.Description("Execution model: 'spot' (default) or 'linear_perp' for USDT-margined perpetuals. Defaults to linear_perp when the exchange name ends in _futures, so naming binance_futures alone is enough."), mcp.Enum("spot", "linear_perp")),
+		mcp.WithNumber("leverage", mcp.Description("Starting leverage for a linear_perp wallet. Default 1 (unleveraged). Ignored on spot.")),
+		mcp.WithString("mark_price_source", mcp.Description("What liquidation triggers on: 'mark_series' (default, and what a real exchange uses) or 'trade_close'. The two diverge by up to 1.3% at the bar low on real data, so trade_close misses liquidations a real venue would have hit."), mcp.Enum("mark_series", "trade_close")),
+		mcp.WithBoolean("funding_enabled", mcp.Description("Charge perpetual funding. Default true. Turning it off is a directional bias, not a simplification — it flatters whichever side was being paid over the window.")),
+		mcp.WithString("contract_specs_version", mcp.Description("Pins the maintenance-margin ladder so a stored result stays reproducible after the exchange revises its tiers, e.g. binance_futures/2026-08-28. Empty uses the newest capture.")),
 	)
 	add(s, tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		exchange, err := req.RequireString("exchange")
@@ -94,6 +126,43 @@ func addCreateBacktestSession(s *server.MCPServer, d Deps) {
 			return toolErr(fmt.Errorf("to: %w", err)), nil
 		}
 
+		// A _futures exchange is a perpetual venue by name, so naming one is
+		// enough. Without this default, asking for binance_futures and
+		// forgetting market_type produced a spot wallet running on perpetual
+		// data — no error, and a run whose fees, leverage and liquidation
+		// were all silently wrong.
+		marketType := req.GetString("market_type", "")
+		if marketType == "" && strings.HasSuffix(exchange, "_futures") {
+			marketType = "linear_perp"
+		}
+
+		wallet := initialWallet{
+			Exchange:   exchange,
+			Asset:      asset,
+			Balance:    balance,
+			MarketType: marketType,
+			Leverage:   req.GetFloat("leverage", 0),
+		}
+
+		var sim *simulationOptions
+		if marketType == "linear_perp" {
+			// v1 supports isolated margin and one-way positions only. Stating
+			// them makes the run self-describing rather than dependent on
+			// whatever the engine currently defaults to.
+			sim = &simulationOptions{
+				MarginMode:           "isolated",
+				PositionMode:         "one_way",
+				MarkPriceSource:      req.GetString("mark_price_source", ""),
+				ContractSpecsVersion: req.GetString("contract_specs_version", ""),
+			}
+			if args := req.GetArguments(); args != nil {
+				if _, ok := args["funding_enabled"]; ok {
+					enabled := req.GetBool("funding_enabled", true)
+					sim.FundingEnabled = &enabled
+				}
+			}
+		}
+
 		body := createSessionBody{
 			Streams: []streamConfig{{
 				SessionID: uuid.New(),
@@ -103,11 +172,8 @@ func addCreateBacktestSession(s *server.MCPServer, d Deps) {
 				From:      from,
 				To:        to,
 			}},
-			InitialWallets: []initialWallet{{
-				Exchange: exchange,
-				Asset:    asset,
-				Balance:  balance,
-			}},
+			InitialWallets: []initialWallet{wallet},
+			Simulation:     sim,
 		}
 
 		respBody, status, err := d.HTTP.Do(ctx, true, client.HeaderStyleBacktester, http.MethodPost, client.Backtester, "/api/v1/dev/session", nil, body)

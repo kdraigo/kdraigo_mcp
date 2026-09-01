@@ -25,7 +25,8 @@ err = s.Start(context.Background())
 |---|---|
 | `types.EnvBacktest` | backtester_engine via WS to `/api/v1/dev/session/ws` |
 | `types.EnvRealBybit` / `types.EnvTestBybit` | Bybit Spot live/testnet |
-| `types.EnvRealBinance` / `types.EnvTestBinance` | Binance live/testnet |
+| `types.EnvRealBinance` / `types.EnvTestBinance` | Binance Spot live/testnet |
+| `types.EnvRealBinanceFutures` / `types.EnvTestBinanceFutures` | Binance USDⓈ-M perpetuals live/testnet |
 
 ## types
 
@@ -53,7 +54,8 @@ Key types you will touch:
 
 - `types.Candle` — `Exchange`, `Symbol`, `Timeframe`, `OpenTime`, `CloseTime`, `Open/High/Low/Close/Volume`, `IsComplete`. `Volume` is the **base-asset** volume (there is no separate `BaseVolume` field). Plus order-flow metrics for Wyckoff / Composite-Man analysis: `TradeCount` (int64, number of trades), `QuoteVolume` (quote-asset turnover), `TakerBuyBaseVolume` and `TakerBuyQuoteVolume` (aggressive-buy pressure). These are **0 when the source exchange doesn't provide them** — Binance klines populate all of them; e.g. Bybit exposes `QuoteVolume` but not `TradeCount`/taker-buy splits. Guard on non-zero before relying on them.
 - `types.Order` — `ID`, `Side` (BUY/SELL), `Type` (MARKET/LIMIT/STOP_LOSS/STOP_LOSS_LIMIT/TAKE_PROFIT_LIMIT), `Status` (NEW/PARTIALLY_FILLED/FILLED/CANCELED/REJECTED), `Price`, `Quantity`, `FilledQty`, `AveragePrice`, plus `StopPrice` and `GroupID` for bracket legs (`GroupID` is shared by the two legs of a bracket, empty otherwise).
-- `types.OrderRequest` — what you pass to `ctx.PlaceOrder`. Includes `StopPrice` (trigger for stop orders) plus `Reason` (`map[string]any`) and `Logs` (`[]string`) for telemetry.
+- `types.OrderRequest` — what you pass to `ctx.PlaceOrder`. Includes `StopPrice` (trigger for stop orders), `ReduceOnly` (futures only — see the perpetual futures section) plus `Reason` (`map[string]any`) and `Logs` (`[]string`) for telemetry.
+- `types.Position` — returned by `s.GetPositions`; futures only. See the perpetual futures section.
 - `types.Context` — provided to every callback; exposes `PlaceOrder`, `CancelOrder`, `Now`, `GetIndicator`, the `Config`, and the `Trader` (paper or live).
 - `types.Timeframe` — string-backed; constants `Timeframe1m`, `Timeframe3m`, `Timeframe5m`, `Timeframe15m`, `Timeframe30m`, `Timeframe1h`, `Timeframe2h`, `Timeframe4h`, `Timeframe1d`.
   All of these are now genuinely aggregated server-side. Previously `3m`, `30m` and `2h` were
@@ -190,10 +192,153 @@ produced it.
 
 ### Short positions
 
-The backtest paper wallet supports shorts: a `SELL` that exceeds your current long
-position opens a short (it tracks an average short price and liquidation value).
-**Caveat:** live *spot* adapters cannot short — a short-based strategy that backtests
-cleanly may misbehave or be rejected when run live on a spot exchange.
+On a **spot** wallet the backtest simulates shorts: a `SELL` exceeding your current
+long opens one. Live spot adapters cannot — spot is a cash balance, so a short-based
+strategy that backtests cleanly on spot will be rejected when run live. If you want
+shorts that work in both places, use perpetuals.
+
+On a **perpetual** wallet shorting is native and symmetric with going long. See the
+futures section below.
+
+## perpetual futures
+
+Perpetuals are a **separate exchange**, not a mode of the spot one. `binance_futures`
+has its own candle data, funding rates, mark-price series and maintenance-margin
+ladder, all collected and stored separately from `binance`. Name it and you get a
+futures wallet:
+
+```go
+Backtest: &types.BacktestOptions{
+    RequestedExchanges: []string{"binance_futures"},
+    Assets:             []string{"BTC/USDT"},
+    WalletsByExchange:  map[string]map[string]float64{"binance_futures": {"USDT": 10000}},
+    LeverageByExchange: map[string]float64{"binance_futures": 5},
+    // MarketTypeByExchange is optional: an exchange whose name ends in
+    // _futures defaults to linear_perp. Set it explicitly only to override.
+    StartTime: ..., EndTime: ...,
+}
+```
+
+Live is the same strategy against a different environment:
+
+```go
+Environment: types.EnvTestBinanceFutures,
+Live: &types.LiveOptions{
+    RequestedExchanges: []string{"binance_futures"},
+    Assets:             []string{"BTCUSDT"},
+    Leverage:           map[string]float64{"BTCUSDT": 5},
+    MaxOrderNotional:   500,  // required — no default
+    MaxLeverage:        10,   // required — no default
+},
+```
+
+### What v1 supports
+
+**Isolated margin, one-way positions, linear (USDT-margined) contracts.** Cross
+margin, hedge mode and inverse contracts are rejected at session creation rather
+than half-supported. The live adapter refuses to start against an exchange account
+configured differently, because running it would produce different semantics from
+the backtest that justified the strategy.
+
+Available exchanges: `binance_futures`, `bybit_futures` (backtest); `binance_futures`
+(live).
+
+### Futures-only API
+
+These are optional capabilities: an adapter that lacks them returns
+`sdk.ErrUnsupportedByAdapter`, which you can test for and fall back on.
+
+```go
+err := s.SetLeverage(ctx, "binance_futures", "BTC/USDT", 5)
+positions, err := s.GetPositions(ctx, "binance_futures") // empty exchange = all wallets
+orders, err := s.PlaceBracket(ctx, &types.BracketRequest{...})
+```
+
+- **`SetLeverage`** is refused while a position is open, on both the simulator and
+  the live venue. Re-levering an open position rewrites its liquidation price, which
+  no exchange lets you do either.
+- **`GetPositions`** returns `types.Position`: `Side` ("LONG"/"SHORT"), `Size`
+  (always positive — flat is the absence of a position, not a zero-size one),
+  `EntryPrice` (size-weighted), `Leverage`, `IsolatedMargin` (which under isolated
+  margin is also the maximum loss), `MarkPrice`, `UnrealizedPnL`. In backtest,
+  `RealizedPnL` and `FundingPaid` accumulate over the position's life; live leaves
+  them at zero, because the venue does not attribute them per position lifetime and
+  inventing the number would misattribute payments after a flip.
+- **`PlaceBracket`** places a take-profit and a protective stop as a pair. On
+  futures the legs reserve nothing — margin is already posted against the position —
+  so both rest at once, unlike on spot.
+
+### `ReduceOnly`
+
+`OrderRequest.ReduceOnly` restricts an order to shrinking a position: it can never
+open one, nor flip an existing one. Set it on every protective exit.
+
+It exists for a specific failure. In one-way mode a stop sized larger than the
+position — a stale bracket, or sizing computed off intended rather than filled
+exposure — does not stop at flat: the surplus opens a position on the other side, so
+you end up with the same exposure inverted on exactly the bar you wanted none.
+
+It is futures-only. A spot wallet rejects it rather than ignoring it.
+
+### Stops trigger on the mark, not the last trade
+
+Liquidation and stop triggers use the venue's mark-price series by default
+(`SimulationOptions.MarkPriceSource: "mark_series"`). This is not a detail: measured
+on production data the mark and the trade price diverge by up to 1.3% at the bar low,
+and on ~3% of bars the mark wicks below the trade low — liquidations a trade-price
+model misses entirely. The live adapter sets `workingType=MARK_PRICE` for the same
+reason, so live and backtest agree about when a stop fires.
+
+### Funding
+
+Charged every settlement (8h on Binance) while a position is open, at
+`signedSize × mark × rate`. A long pays when the rate is positive. Over a long hold
+funding can exceed the trading PnL, so it is on by default; `funding_enabled: false`
+is allowed for isolating its effect but is a directional bias, not a simplification.
+
+Read the ledger back with the `get_session_funding` tool, and positions with
+`get_session_positions`.
+
+### Liquidation
+
+A position is force-closed when the mark crosses its liquidation price, computed from
+the venue's own captured maintenance-margin tiers:
+
+```
+LONG:  (Size·Entry − IM − cum) / (Size·(1 − MMR))
+SHORT: (Size·Entry + IM + cum) / (Size·(1 + MMR))
+```
+
+The margin is forfeited, the position row records `liquidated = true` with
+`isolated_margin = 0`, and a `LIQUIDATION` order appears in the log. Live, the same
+event arrives through `SetOnOrderUpdate`. Pin `contract_specs_version` if you need a
+stored result to stay reproducible after the exchange revises its tiers.
+
+### Live futures safety gates
+
+A mainnet futures order passes four independent gates, all of which must hold:
+
+1. `Environment` is `real_binance_futures` — testnet is a different value, not a flag.
+2. `LiveOptions.Armed` is explicitly true; it defaults to false.
+3. `KDRAIGO_LIVE_ARMED=1` is set in the process environment. Config alone cannot arm
+   a machine, because a config can be committed or copied.
+4. The order's notional is under `MaxOrderNotional` and leverage under `MaxLeverage`.
+   Both are **required with no default**, so a forgotten cap is a refusal rather than
+   an unlimited one. These apply on testnet too.
+
+`LiveOptions.DryRun` logs the exact request and returns a synthetic ack, which is how
+you exercise a strategy against real market data without touching the account.
+
+Failures come back as `*live.ErrNotArmed`, naming the gate.
+
+### Known live limitation
+
+Conditional order types (stop, take-profit) are **refused by Binance futures testnet**
+with error `-4120`, on the documented `/fapi/v1/order` endpoint, even though the
+instrument's own `exchangeInfo` advertises them. The SDK surfaces this as
+`live.ErrConditionalOrdersUnavailable` and does **not** fall back to a market order —
+a protective stop that executes immediately is worse than one that fails loudly. Test
+protective logic in backtest, where stops are fully modelled.
 
 ## indicators
 

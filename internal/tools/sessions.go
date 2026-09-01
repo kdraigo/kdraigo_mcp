@@ -19,6 +19,8 @@ func RegisterSessions(s *server.MCPServer, d Deps) {
 	addGetSessionDetail(s, d)
 	addDeleteSession(s, d)
 	addUpdateSessionMetadata(s, d)
+	addGetSessionPositions(s, d)
+	addGetSessionFunding(s, d)
 }
 
 func addListSessions(s *server.MCPServer, d Deps) {
@@ -53,7 +55,7 @@ func addListSessions(s *server.MCPServer, d Deps) {
 
 func addGetSessionDetail(s *server.MCPServer, d Deps) {
 	tool := mcp.NewTool("get_session_detail",
-		mcp.WithDescription("Fetch a single session's metadata and wallet snapshots. Orders and analytics are served by separate endpoints/tools, not by this call."),
+		mcp.WithDescription("Fetch a single session's metadata and wallet snapshots. Orders, analytics, positions and funding are served by separate tools, not by this call — see get_session_positions and get_session_funding for a perpetual-futures run."),
 		mcp.WithString("session_id", mcp.Required(), mcp.Description("Session UUID")),
 	)
 	add(s, tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -129,6 +131,53 @@ func addUpdateSessionMetadata(s *server.MCPServer, d Deps) {
 		}
 		if status < 200 || status >= 300 {
 			return toolErr(httpErr("update_session_metadata", status, body)), nil
+		}
+		return toolText(string(body)), nil
+	})
+}
+
+func addGetSessionPositions(s *server.MCPServer, d Deps) {
+	tool := mcp.NewTool("get_session_positions",
+		mcp.WithDescription("Futures positions a session held, oldest first. Empty for a spot session. "+
+			"These are not derivable from the order log: an order records what was requested and filled, never what the position became. "+
+			"Posted margin, the size-weighted entry, realized PnL, accrued funding and whether the position was liquidated are all wallet state."),
+		mcp.WithString("session_id", mcp.Required(), mcp.Description("Session UUID")),
+	)
+	add(s, tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		id, err := req.RequireString("session_id")
+		if err != nil {
+			return toolErr(err), nil
+		}
+		body, status, err := d.HTTP.Do(ctx, true, client.HeaderStyleStandard, http.MethodGet, client.FrontendAPI, "/api/v1/dev/sessions/"+id+"/positions", nil, nil)
+		if err != nil {
+			return toolErr(err), nil
+		}
+		if status < 200 || status >= 300 {
+			return toolErr(httpErr("get_session_positions", status, body)), nil
+		}
+		return toolText(string(body)), nil
+	})
+}
+
+func addGetSessionFunding(s *server.MCPServer, d Deps) {
+	tool := mcp.NewTool("get_session_funding",
+		mcp.WithDescription("The funding ledger for a session, one row per settlement, oldest first. Empty for a spot session. "+
+			"Kept per settlement rather than as a total because over a long hold funding can exceed the trading PnL, and only individual rows can be checked against the venue's published rates. "+
+			"Each row carries the signed position size, the mark price and which source that mark came from ('inline' is the venue's own settlement mark; anything else is a stand-in), so the payment can be re-derived rather than taken on trust. "+
+			"A positive amount means the position paid."),
+		mcp.WithString("session_id", mcp.Required(), mcp.Description("Session UUID")),
+	)
+	add(s, tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		id, err := req.RequireString("session_id")
+		if err != nil {
+			return toolErr(err), nil
+		}
+		body, status, err := d.HTTP.Do(ctx, true, client.HeaderStyleStandard, http.MethodGet, client.FrontendAPI, "/api/v1/dev/sessions/"+id+"/funding", nil, nil)
+		if err != nil {
+			return toolErr(err), nil
+		}
+		if status < 200 || status >= 300 {
+			return toolErr(httpErr("get_session_funding", status, body)), nil
 		}
 		return toolText(string(body)), nil
 	})
