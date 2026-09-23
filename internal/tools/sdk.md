@@ -404,6 +404,68 @@ look-ahead: in backtest the fetch is a pure read served by the engine, which rej
 any range past the simulated clock — so a session can start trading on the first bar
 instead of burning a warm-up window with orders suppressed.
 
+### resuming an interrupted run
+
+A dropped connection no longer ends a backtest. The engine holds the session —
+wallets, positions, and its place in the candle stream — for a resume window
+(one hour by default), and the **same API key** that created it may reattach and
+carry on.
+
+Two levels, and most strategies need neither:
+
+**1. In-process reconnects are automatic.** If the socket drops mid-run the SDK
+redials with backoff and continues. Ticks carry a sequence number, so a candle
+the dropped connection never delivered is re-requested rather than skipped —
+delivery is exactly-once across any number of reconnects. Indicators and the
+in-flight aggregate bar are untouched, because the process never died. Nothing
+to write.
+
+**2. Cold resume, after the bot's process restarted.** Pass the session id:
+
+```go
+cfg.Backtest.SessionID = "0f2c…"   // empty means "create a new session"
+```
+
+`PrepareSession` then skips session creation and attaches instead. This is the
+case where your own memory is gone — indicators, partial bars, whatever you
+tracked about your position — so rebuild it from the engine's view:
+
+```go
+s.SetOnResume(func(ctx *types.Context, st *types.SessionState) {
+    if !st.ColdStart {
+        return // a mere reconnect: indicators are intact, nothing to do
+    }
+    // Warm indicators up to the playhead — the same idiom as above, bounded
+    // by where the run actually stopped.
+    _, _ = s.GetCandlesFromTo(ctx.Ctx, "binance", "BTC/USDT",
+        cfg.Backtest.StartTime, st.Playhead, types.Timeframe1h)
+
+    // The engine is authoritative about what you hold. Reconcile against it
+    // rather than trusting anything you remember.
+    inPosition = len(st.Positions) > 0
+    openOrders = st.OpenOrders
+})
+```
+
+`OnResume` fires **before** any candle from the resumed connection reaches your
+strategy, and runs synchronously on the stream goroutine — a long history fetch
+delays the first bar, which is the right trade: the alternative lets a bar land
+before your indicators are warm.
+
+**What the SDK will not do:** silently start a fresh session. If the session is
+gone — expired, evicted, or the engine restarted — `Start` returns an error and
+`OnComplete` does not fire. Starting over quietly would hand you results you
+would read as a continuation of a run that no longer exists. Decide yourself
+whether to begin again.
+
+Three failure codes are worth telling apart: `session_unknown` (gone — do not
+retry), `session_key_mismatch` (right user, wrong API key — a configuration
+error), and `session_terminal` (that run already finished).
+
+**Limits.** The resume window is engine memory, so a parked session does *not*
+survive an engine restart or redeploy. A run's budget (4h by default) counts
+only time actually spent driving it — an hour parked costs nothing.
+
 Below, the leading `exchange, symbol` are omitted; `pt` = `pointType`; return is one `[]float64` + `error` unless noted.
 
 ### Overlap / moving averages

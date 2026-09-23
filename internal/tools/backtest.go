@@ -188,6 +188,7 @@ func addCreateBacktestSession(s *server.MCPServer, d Deps) {
 }
 
 type tickPayload struct {
+	Seq    uint64            `json:"seq"`
 	Tick   json.RawMessage   `json:"tick"`
 	Done   bool              `json:"done"`
 	Orders []json.RawMessage `json:"orders"`
@@ -212,13 +213,29 @@ func addRunBacktestStream(s *server.MCPServer, d Deps) {
 		}
 		defer ws.Close()
 
+		// Say goodbye explicitly. Closing the socket on its own now means
+		// "my connection broke", which parks the session with its wallets and
+		// upstream candle stream held open for the resume window — so a
+		// bake-out that simply hung up would leave an hour-long zombie behind.
+		closed := false
+		defer func() {
+			if !closed {
+				_ = ws.Send(context.WithoutCancel(ctx), client.WSAction{Action: "close"})
+			}
+		}()
+
 		total := 0
 		fills := 0
+		// seq makes tick delivery exactly-once: a retry of the same sequence
+		// returns the same candle rather than advancing the run past one this
+		// client never saw.
+		var seq uint64
 		for {
 			if maxCandles > 0 && total >= maxCandles {
 				break
 			}
-			if err := ws.Send(ctx, client.WSAction{Action: "next"}); err != nil {
+			seq++
+			if err := ws.Send(ctx, client.WSAction{Action: "next", Data: map[string]any{"seq": seq}}); err != nil {
 				return toolErr(fmt.Errorf("ws send: %w", err)), nil
 			}
 			// Read until the matching "next" response, skipping async keepalive/
@@ -231,12 +248,16 @@ func addRunBacktestStream(s *server.MCPServer, d Deps) {
 					return toolErr(fmt.Errorf("ws recv: %w", err)), nil
 				}
 				if resp.Status != "ok" {
+					if resp.Code != "" {
+						return toolErr(fmt.Errorf("engine error (%s): %s", resp.Code, resp.Error)), nil
+					}
 					return toolErr(fmt.Errorf("engine error: %s", resp.Error)), nil
 				}
 				if resp.Action == "next" {
 					break
 				}
-				// progress / heartbeat — ignore and keep waiting for the tick.
+				// progress / heartbeat / session_state — ignore and keep
+				// waiting for the tick.
 			}
 			var tp tickPayload
 			if err := json.Unmarshal(resp.Data, &tp); err != nil {
@@ -248,6 +269,11 @@ func addRunBacktestStream(s *server.MCPServer, d Deps) {
 			}
 			total++
 		}
+
+		if err := ws.Send(ctx, client.WSAction{Action: "close"}); err != nil {
+			return toolErr(fmt.Errorf("ws close: %w", err)), nil
+		}
+		closed = true
 
 		summary, _ := json.Marshal(map[string]any{
 			"total_candles": total,

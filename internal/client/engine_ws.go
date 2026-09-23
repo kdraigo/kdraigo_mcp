@@ -29,6 +29,9 @@ type WSResponse struct {
 	Status    string          `json:"status"`
 	Data      json.RawMessage `json:"data,omitempty"`
 	Error     string          `json:"error,omitempty"`
+	// Code is a stable machine-readable reason accompanying Error, so a caller
+	// can tell a transient failure from a permanent one without matching prose.
+	Code string `json:"code,omitempty"`
 }
 
 // SessionWS is a thin connection to /api/v1/dev/session/ws on backtester_engine.
