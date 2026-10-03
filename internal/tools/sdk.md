@@ -54,6 +54,8 @@ Key types you will touch:
 
 - `types.Candle` — `Exchange`, `Symbol`, `Timeframe`, `OpenTime`, `CloseTime`, `Open/High/Low/Close/Volume`, `IsComplete`. `Volume` is the **base-asset** volume (there is no separate `BaseVolume` field). Plus order-flow metrics for Wyckoff / Composite-Man analysis: `TradeCount` (int64, number of trades), `QuoteVolume` (quote-asset turnover), `TakerBuyBaseVolume` and `TakerBuyQuoteVolume` (aggressive-buy pressure). These are **0 when the source exchange doesn't provide them** — Binance klines populate all of them; e.g. Bybit exposes `QuoteVolume` but not `TradeCount`/taker-buy splits. Guard on non-zero before relying on them.
 - `types.Order` — `ID`, `Side` (BUY/SELL), `Type` (MARKET/LIMIT/STOP_LOSS/STOP_LOSS_LIMIT/TAKE_PROFIT_LIMIT), `Status` (NEW/PARTIALLY_FILLED/FILLED/CANCELED/REJECTED), `Price`, `Quantity`, `FilledQty`, `AveragePrice`, plus `StopPrice` and `GroupID` for bracket legs (`GroupID` is shared by the two legs of a bracket, empty otherwise).
+  - **Fees:** `Fee` + `FeeAsset` are what the venue reported **on this update**, and backends differ: the latest fill's commission alone on Binance futures, a running total on Bybit, the whole order's fee in backtests (orders fill whole there). For an order's total read `CumulativeFee` (dev_sdk ≥ v1.2.12), which means the same on every backend. Summing `Fee` over updates is only right on Binance futures, and only if no update is missed.
+  - **`RealizedPnL`** (dev_sdk ≥ v1.2.12) is the venue's realized profit on the order's fills so far, before fees. Binance futures only; 0 on spot and in backtests, where futures P&L is on the positions (`get_session_positions`).
 - `types.OrderRequest` — what you pass to `ctx.PlaceOrder`. Includes `StopPrice` (trigger for stop orders), `ReduceOnly` (futures only — see the perpetual futures section) plus `Reason` (`map[string]any`) and `Logs` (`[]string`) for telemetry.
 - `types.Position` — returned by `s.GetPositions`; futures only. See the perpetual futures section.
 - `types.Context` — provided to every callback; exposes `PlaceOrder`, `CancelOrder`, `Now`, `GetIndicator`, the `Config`, and the `Trader` (paper or live).
@@ -169,8 +171,15 @@ returns `INSUFFICIENT_FUNDS`. A strategy that wants a laddered exit should place
 bracket 1 for the first tranche, then re-bracket the remainder when it fills. For a
 bar-driven backtest the difference is nil.
 
-Live adapters do not implement brackets and return `dev_sdk.ErrUnsupportedByAdapter`;
-check for it if your strategy is meant to run in both modes.
+Live, **Binance futures** implements `PlaceBracket`: both legs are reduce-only, the
+take-profit rests as a limit order and the stop goes through the algo-order endpoint
+(see "Conditional orders on Binance futures" under perpetual futures). Binance does not
+link the legs, so the adapter cancels the survivor itself when the first one fills, and
+logs an orphan if that cancel fails. Futures legs reserve no funds, so both rest at
+once. Without `StopLimitPrice` the stop is market-on-trigger.
+
+The spot adapters (Binance, Bybit) do not implement brackets and return
+`dev_sdk.ErrUnsupportedByAdapter`; check for it if your strategy runs on both.
 
 ### fees and the fill model
 
@@ -331,14 +340,24 @@ you exercise a strategy against real market data without touching the account.
 
 Failures come back as `*live.ErrNotArmed`, naming the gate.
 
-### Known live limitation
+### Conditional orders on Binance futures
 
-Conditional order types (stop, take-profit) are **refused by Binance futures testnet**
-with error `-4120`, on the documented `/fapi/v1/order` endpoint, even though the
-instrument's own `exchangeInfo` advertises them. The SDK surfaces this as
-`live.ErrConditionalOrdersUnavailable` and does **not** fall back to a market order —
-a protective stop that executes immediately is worse than one that fails loudly. Test
-protective logic in backtest, where stops are fully modelled.
+Since dev_sdk v1.2.0, stops go through Binance's algo-order endpoint
+(`/fapi/v1/algoOrder`). The ordinary `/fapi/v1/order` endpoint refuses every
+conditional type with `-4120`, even though the instrument's `exchangeInfo` advertises
+them. What that means for a strategy:
+
+- A stop's order id carries an **`algo:` prefix**. Pass it to `CancelOrder` unchanged.
+- When a stop triggers, Binance creates an ordinary order to fill it. The SDK reports
+  that fill under the stop's own `algo:` id and type, so `SetOnOrderUpdate` sees the
+  stop you placed fill, not a market order you never placed.
+- Triggers use `workingType=MARK_PRICE`, as in the backtest. A stop is reduce-only when
+  you set `ReduceOnly` (bracket legs always do).
+- If an environment refuses conditional orders anyway, the SDK returns
+  `live.ErrConditionalOrdersUnavailable` and does **not** fall back to a market order:
+  a protective stop that executes immediately is worse than one that fails loudly.
+  Check for it, and fall back deliberately if you must (for example, watch the mark and
+  close at market).
 
 ## indicators
 
