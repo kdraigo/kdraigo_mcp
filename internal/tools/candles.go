@@ -14,7 +14,7 @@ import (
 // RegisterCandles adds get_candles, calling the unauthenticated data_provider /api/v1/candles.
 func RegisterCandles(s *server.MCPServer, d Deps) {
 	tool := mcp.NewTool("get_candles",
-		mcp.WithDescription("Fetch OHLCV candles from data_provider. Public endpoint, no auth required."),
+		mcp.WithDescription("Fetch OHLCV candles from data_provider. Public endpoint, no auth required. At most 50,000 bars per call (about a month of 1m): for longer ranges, use a larger timeframe or split the range into several calls."),
 		mcp.WithString("exchange", mcp.Required(), mcp.Description("Exchange ID, e.g. binance or bybit")),
 		mcp.WithString("symbol", mcp.Required(), mcp.Description("Symbol, slash form e.g. BTC/USDT")),
 		mcp.WithString("timeframe", mcp.Required(), mcp.Description("Timeframe. One of: 1m, 2m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 1d, 1w, 1M. Case-sensitive: 1m is one minute, 1M is one month. Anything else is rejected with HTTP 400 — it is not silently served as 1m data.")),

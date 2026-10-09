@@ -566,6 +566,7 @@ The hosted backtester enforces these per session and per account. Normal strateg
 | Stored reasoning per session | 64 MB of `Reason` + `Logs` | Orders keep executing; one response carries `warning`, and later reasoning is not stored |
 | One WebSocket message | 64 KB | The connection closes (1009) and the session ends `FAILED` |
 | Streams per session | 1–50 | Create returns 400, code `invalid_request` |
+| Bars per history / candles request | 50,000 (about a month of 1m) | 400 `too many bars`: use a larger timeframe or split the range |
 | Live sessions per account | 10 (running, or waiting to be resumed) | Create returns 429, code `too_many_sessions`: let one finish or close it |
 | Platform capacity | — | Create returns 503, code `capacity_exceeded`: retry later |
 
