@@ -56,6 +56,7 @@ Key types you will touch:
 - `types.Order` — `ID`, `Side` (BUY/SELL), `Type` (MARKET/LIMIT/STOP_LOSS/STOP_LOSS_LIMIT/TAKE_PROFIT_LIMIT), `Status` (NEW/PARTIALLY_FILLED/FILLED/CANCELED/REJECTED), `Price`, `Quantity`, `FilledQty`, `AveragePrice`, plus `StopPrice` and `GroupID` for bracket legs (`GroupID` is shared by the two legs of a bracket, empty otherwise).
   - **Fees:** `Fee` + `FeeAsset` are what the venue reported **on this update**, and backends differ: the latest fill's commission alone on Binance futures, a running total on Bybit, the whole order's fee in backtests (orders fill whole there). For an order's total read `CumulativeFee` (dev_sdk ≥ v1.2.12), which means the same on every backend. Summing `Fee` over updates is only right on Binance futures, and only if no update is missed.
   - **`RealizedPnL`** (dev_sdk ≥ v1.2.12) is the venue's realized profit on the order's fills so far, before fees. Binance futures only; 0 on spot and in backtests, where futures P&L is on the positions (`get_session_positions`).
+  - **`ReduceOnly`** (dev_sdk ≥ v1.2.13) is true for an order that can only shrink a position (a stop loss, a take profit, a closing order). Set on live Binance futures, including a stop that has fired; false on spot and in backtests. Live telemetry also sends it and the stop price, so the platform can show a resting stop and tell an exit from an entry.
 - `types.OrderRequest` — what you pass to `ctx.PlaceOrder`. Includes `StopPrice` (trigger for stop orders), `ReduceOnly` (futures only — see the perpetual futures section) plus `Reason` (`map[string]any`) and `Logs` (`[]string`) for telemetry.
 - `types.Position` — returned by `s.GetPositions`; futures only. See the perpetual futures section.
 - `types.Context` — provided to every callback; exposes `PlaceOrder`, `CancelOrder`, `Now`, `GetIndicator`, the `Config`, and the `Trader` (paper or live).
@@ -131,7 +132,7 @@ triggers when the bar trades at or below `StopPrice`, a BUY stop at or above —
 short's protective stop is expressible. **An unknown order type is rejected**; it
 previously became a plain limit order, which behaves as the opposite of a stop.
 
-`Reason` and `Logs` are forwarded to the backtester engine and persisted alongside the order. Use them — they are returned by the orders endpoint/tool so a run can be reviewed and explained after the fact.
+`Reason` and `Logs` are forwarded to the backtester engine and persisted alongside the order. Use them — they are returned by the orders endpoint/tool so a run can be reviewed and explained after the fact. They are capped exactly as live telemetry is: a `Reason` over 4 KB is stored as `{"_truncated":true,"_original_size":N}`, and `Logs` keep at most 31 lines of up to 1 KB (16 KB in all) plus a `[truncated N more lines]` line. The order itself is never refused for this. See `## limits`.
 
 ### fill semantics in backtest
 
@@ -554,6 +555,21 @@ Below, the leading `exchange, symbol` are omitted; `pt` = `pointType`; return is
 **Math** — element-wise transforms take `pt` only and return a series: `Acos` `Asin` `Atan` `Ceil` `Cos` `Cosh` `Exp` `Floor` `Ln` `Log10` `Sin` `Sinh` `Sqrt` `Tan` `Tanh`. Operators: `Add` `Sub` `Mult` `Div` (`pt0, pt1`); `Max` `Min` `MaxIndex` `MinIndex` `Sum` (`pt, period int`); `MinMax` `MinMaxIndex` (`pt, period int` → two series).
 
 Full reference with descriptions: `dev_sdk/indicators/README.md`.
+
+## limits
+
+The hosted backtester enforces these per session and per account. Normal strategies never come near them (the largest real session so far placed about 3,000 orders).
+
+| Limit | Value | When reached |
+|---|---|---|
+| Orders per session | 100,000 | That order is refused with code `order_limit_reached` and the session ends `FAILED`; orders placed before it are kept |
+| Stored reasoning per session | 64 MB of `Reason` + `Logs` | Orders keep executing; one response carries `warning`, and later reasoning is not stored |
+| One WebSocket message | 64 KB | The connection closes (1009) and the session ends `FAILED` |
+| Streams per session | 1–50 | Create returns 400, code `invalid_request` |
+| Live sessions per account | 10 (running, or waiting to be resumed) | Create returns 429, code `too_many_sessions`: let one finish or close it |
+| Platform capacity | — | Create returns 503, code `capacity_exceeded`: retry later |
+
+A session that is created but never driven waits up to an hour for a client and counts toward the 10 meanwhile, so drive or close what you create.
 
 ## auth
 
