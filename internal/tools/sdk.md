@@ -585,6 +585,8 @@ A session's storage is measured when it finishes. A session that is created but 
 
 Strategies authenticate to the platform with the same Ed25519 keypair the MCP server uses. Set `KDRAIGO_KEY_ID` and `KDRAIGO_PRIVATE_KEY` in env; the scaffolded templates read them. Never commit either value.
 
+Requests are signed with signing version 2 (dev_sdk v1.3.0+ and this MCP server). The signature covers the method, path, query string, a one-time nonce and a hash of the body, and the platform accepts each signature once. Backtest WebSockets send their credentials as headers, not in the URL. Older SDK versions still work: their WebSocket signatures are accepted once each, and reconnects re-sign.
+
 ## endpoints
 
 `BacktestOptions.Endpoint` is the **backtester_engine** base URL:

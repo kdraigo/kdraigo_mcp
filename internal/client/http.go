@@ -100,8 +100,13 @@ func (h *HTTP) Do(ctx context.Context, signed bool, style HeaderStyle, method st
 
 	if signed {
 		ts := strconv.FormatInt(time.Now().Unix(), 10)
-		// Sign the upstream path (nginx strips the service prefix before forwarding).
-		sig := h.signer.Sign(method, path, ts, string(bodyBytes))
+		nonce, err := auth.NewNonce()
+		if err != nil {
+			return nil, 0, fmt.Errorf("nonce: %w", err)
+		}
+		// Signing version 2: the upstream path (nginx strips the service
+		// prefix before forwarding), the query and a one-time nonce.
+		sig := h.signer.SignV2(method, path, query, ts, nonce, bodyBytes)
 		switch style {
 		case HeaderStyleBacktester:
 			req.Header.Set("X-API-KEY", h.signer.KeyID())
@@ -112,6 +117,7 @@ func (h *HTTP) Do(ctx context.Context, signed bool, style HeaderStyle, method st
 			req.Header.Set("X-Signature", sig)
 			req.Header.Set("X-Timestamp", ts)
 		}
+		req.Header.Set("X-Nonce", nonce)
 	}
 
 	resp, err := h.hc.Do(req)

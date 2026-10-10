@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -45,7 +46,15 @@ func DialSessionWS(ctx context.Context, endpoint string, signer *auth.Signer, se
 	// Canonical signed path: /api/v1/dev/session/ws (upstream path, post-prefix-strip).
 	const wsPath = "/api/v1/dev/session/ws"
 	ts := strconv.FormatInt(time.Now().Unix(), 10)
-	sig := signer.Sign("GET", wsPath, ts, "")
+	nonce, err := auth.NewNonce()
+	if err != nil {
+		return nil, fmt.Errorf("nonce: %w", err)
+	}
+	q := url.Values{}
+	q.Set("id", sessionID)
+	// Signing version 2 covers ?id=, so the signature opens this session and
+	// no other, once. It travels in headers: a URL lands in access logs.
+	sig := signer.SignV2("GET", wsPath, q, ts, nonce, nil)
 
 	base := strings.TrimRight(endpoint, "/")
 	switch {
@@ -55,15 +64,14 @@ func DialSessionWS(ctx context.Context, endpoint string, signer *auth.Signer, se
 		base = "ws://" + strings.TrimPrefix(base, "http://")
 	}
 
-	q := url.Values{}
-	q.Set("id", sessionID)
-	q.Set("key_id", signer.KeyID())
-	q.Set("signature", sig)
-	q.Set("timestamp", ts)
-
 	full := base + string(Backtester) + wsPath + "?" + q.Encode()
 
-	conn, _, err := websocket.Dial(ctx, full, nil)
+	headers := http.Header{}
+	headers.Set("X-API-KEY", signer.KeyID())
+	headers.Set("X-SIGNATURE", sig)
+	headers.Set("X-TIMESTAMP", ts)
+	headers.Set("X-Nonce", nonce)
+	conn, _, err := websocket.Dial(ctx, full, &websocket.DialOptions{HTTPHeader: headers})
 	if err != nil {
 		return nil, fmt.Errorf("ws dial %s: %w", full, err)
 	}
