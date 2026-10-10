@@ -560,17 +560,26 @@ Full reference with descriptions: `dev_sdk/indicators/README.md`.
 
 The hosted backtester enforces these per session and per account. Normal strategies never come near them (the largest real session so far placed about 3,000 orders).
 
-| Limit | Value | When reached |
+What an account may use depends on its tier. **basic** is a wallet only; **verified** has a Telegram account linked on the website's account page (one Telegram account verifies one wallet, and after it is unlinked it cannot verify another wallet for 30 days); **admin** is set by the operator. The website's Account page shows the account's tier, its limits and the storage its sessions use; each finished session in `list_sessions` carries its `storage_bytes`.
+
+| Per account or session | basic | verified | admin | When reached |
+|---|---|---|---|---|
+| Storage of finished sessions | 50 MB | 512 MB | no account cap | Create returns 403, code `storage_quota_exceeded`: delete old sessions (retrying does not help) |
+| Sessions at once (running, or waiting to be resumed) | 1 | 3 | 20 | Create returns 429, code `too_many_sessions`: let one finish or close it |
+| Orders per session | 20,000 | 100,000 | 1,000,000 | That order is refused with code `order_limit_reached` and the session ends `FAILED`; orders placed before it are kept |
+| Stored reasoning per session | 8 MB | 64 MB | 256 MB of `Reason` + `Logs` | Orders keep executing; one response carries `warning`, and later reasoning is not stored |
+| Run time per session (parked time not counted) | 2 h | 4 h | 12 h | The session ends `FAILED`: "session run budget exceeded" |
+
+All basic accounts together share 4 running sessions and 10 GB of storage; when the pool is full, a basic account's create returns 503, code `capacity_exceeded`, until sessions finish or are deleted. Verified and admin accounts do not use the pool.
+
+| For everyone | Value | When reached |
 |---|---|---|
-| Orders per session | 100,000 | That order is refused with code `order_limit_reached` and the session ends `FAILED`; orders placed before it are kept |
-| Stored reasoning per session | 64 MB of `Reason` + `Logs` | Orders keep executing; one response carries `warning`, and later reasoning is not stored |
 | One WebSocket message | 64 KB | The connection closes (1009) and the session ends `FAILED` |
 | Streams per session | 1–50 | Create returns 400, code `invalid_request` |
 | Bars per history / candles request | 50,000 (about a month of 1m) | 400 `too many bars`: use a larger timeframe or split the range |
-| Live sessions per account | 10 (running, or waiting to be resumed) | Create returns 429, code `too_many_sessions`: let one finish or close it |
 | Platform capacity | — | Create returns 503, code `capacity_exceeded`: retry later |
 
-A session that is created but never driven waits up to an hour for a client and counts toward the 10 meanwhile, so drive or close what you create.
+A session's storage is measured when it finishes. A session that is created but never driven waits up to an hour for a client and counts toward the sessions at once meanwhile, so drive or close what you create.
 
 ## auth
 
