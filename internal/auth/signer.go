@@ -28,16 +28,9 @@ func NewSigner(keyID, privateKeyHex string) (*Signer, error) {
 
 func (s *Signer) KeyID() string { return s.keyID }
 
-// Sign returns hex(ed25519(METHOD\nPATH\nTIMESTAMP\nBODY)): request signing
-// version 1. Kept for reference; requests are signed with SignV2.
-func (s *Signer) Sign(method, path, timestamp, body string) string {
-	payload := fmt.Sprintf("%s\n%s\n%s\n%s", method, path, timestamp, body)
-	sig := ed25519.Sign(s.privKey, []byte(payload))
-	return hex.EncodeToString(sig)
-}
-
 // Request signing version 2, a copy of lib/auth/signing_v2.go (this module
-// does not import lib). It also signs the query string and a one-time nonce,
+// does not import lib). Version 1 was removed from the platform on
+// 2026-10-11. It also signs the query string and a one-time nonce,
 // so a captured signature cannot be pointed at other parameters or sent
 // again:
 //
