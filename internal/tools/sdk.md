@@ -387,6 +387,7 @@ Every method: `IndicatorManagerFor(tf).<Name>(exchange, symbol string, <params..
 Rules:
 
 - Register the timeframe in `Config.Timeframes`, then read it with `IndicatorManagerFor(tf)`.
+- Call `IndicatorManagerFor` inside the callback, as above. Before dev_sdk v1.3.1 the managers only exist once `Start()` runs, so a manager taken between `New` and `Start` is nil and the first indicator call panics.
 - Latest value is the **last** slice element: `series[len(series)-1]`. TA-Lib zero-fills the leading lookback region.
 - On insufficient data (`len(points) <= period`) or unknown exchange/symbol the call returns an error — return early, it means warm-up isn't finished.
 - `pt` (`pointType`) selects the input series for single-input indicators: `"close"` (default), `"open"`, `"high"`, `"low"`, `"volume"`. Indicators needing OHLC/HL/HLC/HLCV derive them internally and take **no** `pt`.
@@ -482,9 +483,11 @@ Three failure codes are worth telling apart: `session_unknown` (gone — do not
 retry), `session_key_mismatch` (right user, wrong API key — a configuration
 error), and `session_terminal` (that run already finished).
 
-**Limits.** The resume window is engine memory, so a parked session does *not*
-survive an engine restart or redeploy. A run's budget (4h by default) counts
-only time actually spent driving it — an hour parked costs nothing.
+**Limits.** A planned engine redeploy hands every session, running or parked,
+over to the new process, and the SDK reattaches by itself. An engine crash does
+not: its parked sessions are gone and `Start` returns `session_unknown`. A run's
+budget (see `## limits`) counts only time actually spent driving it — an hour
+parked costs nothing.
 
 Below, the leading `exchange, symbol` are omitted; `pt` = `pointType`; return is one `[]float64` + `error` unless noted.
 
@@ -585,7 +588,7 @@ A session's storage is measured when it finishes. A session that is created but 
 
 Strategies authenticate to the platform with the same Ed25519 keypair the MCP server uses. Set `KDRAIGO_KEY_ID` and `KDRAIGO_PRIVATE_KEY` in env; the scaffolded templates read them. Never commit either value.
 
-Requests are signed with signing version 2 (dev_sdk v1.3.0+ and this MCP server). The signature covers the method, path, query string, a one-time nonce and a hash of the body, and the platform accepts each signature once. Backtest WebSockets send their credentials as headers, not in the URL. Older SDK versions still work: their WebSocket signatures are accepted once each, and reconnects re-sign.
+Requests are signed with signing version 2 (dev_sdk v1.3.0+ and this MCP server). The signature covers the method, path, query string, a one-time nonce and a hash of the body, and the platform accepts each signature once. Backtest WebSockets send their credentials as headers, not in the URL. **Version 1 is refused since 2026-10-11**: an older dev_sdk gets `401` with "request signing v1 is no longer accepted: update to dev_sdk v1.3.0+ or kdraigo-mcp v1.0.9+". Pin `github.com/kdraigo/dev_sdk v1.3.0` or later in `go.mod`.
 
 ## endpoints
 
@@ -595,6 +598,25 @@ local one. This is **not** the `endpoint:` in `~/.kdraigo/config.yaml` — that 
 MCP gateway base (`https://kdraigo.com`) for the data/analytics tools. The
 backtester is a separate host: the `kdraigo.com` gateway does not proxy it (the
 session POST 405s), so the SDK and MCP target `api.kdraigo.com` directly.
+
+## live telemetry
+
+A live strategy reports its orders, balances and heartbeats to the platform when `LiveOptions.TelemetryURL` is set:
+
+```go
+Live: &types.LiveOptions{
+    RequestedExchanges: []string{"binance_futures"},
+    Assets:             []string{"BTC/USDT"},
+    TelemetryURL:       "https://api.kdraigo.com/telemetry",
+    StrategyName:       "ema_trend",      // shown on kdraigo.com and in alerts
+    SessionID:          os.Getenv("KD_SESSION_ID"), // optional: keep one session across restarts
+},
+```
+
+- Use `https://api.kdraigo.com/telemetry` exactly. Before dev_sdk v1.3.1 the bare `https://api.kdraigo.com` was completed to a path the gateway does not route, and every event got a 404.
+- Events are signed with the same `Credentials.KeyID` / `PrivateKey` as backtests. Telemetry for a session that belongs to another account is refused (403).
+- Telemetry powers the **Live strategies** page on kdraigo.com and, when the account has linked Telegram, alerts from **@kdraigo_bot** (position opened, SL/TP moves, partly closed, closed, bot offline, stopped, daily summary) and the Telegram Mini App dashboard.
+- Reason and logs are truncated as described under `## placing orders`; the order itself is never refused for it.
 
 ## known gaps
 

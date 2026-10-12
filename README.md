@@ -38,7 +38,11 @@ Override the config path with `KDRAIGO_CONFIG` if you need a non-default locatio
 
 ## Wire into Claude Code
 
-Add to `~/.claude/settings.json`:
+```bash
+claude mcp add --scope user kdraigo -- kdraigo-mcp
+```
+
+Other MCP clients (or a project's `.mcp.json`) take the usual entry:
 
 ```json
 {
@@ -50,7 +54,7 @@ Add to `~/.claude/settings.json`:
 }
 ```
 
-Restart Claude Code. The 12 tools below appear under the `kdraigo` server.
+Restart the client. The 14 tools below appear under the `kdraigo` server.
 
 ## Install the skills
 
@@ -75,7 +79,9 @@ This fetches the skills below from this repo and writes them to `~/.claude/skill
 | `create_backtest_session` | POSTs `/api/v1/dev/session` on backtester_engine, returns a session ID. |
 | `run_backtest_stream` | Drives a session to completion via WS. Returns aggregate stats. |
 | `list_sessions` | Paginated session list from frontend_api. |
-| `get_session_detail` | Single session with orders + analytics summary. |
+| `get_session_detail` | Single session's metadata and wallet snapshots. |
+| `get_session_positions` | Futures positions a session held, oldest first (empty for spot). |
+| `get_session_funding` | Funding ledger for a session, one row per settlement (empty for spot). |
 | `update_session_metadata` | Patches `name`, `notes`, `tags`, `favorite`. |
 | `delete_session` | Removes a session and its data. |
 | `get_analytics_types` | Lists available metric types (equity, trading_frequency, etc.). |
@@ -84,13 +90,14 @@ This fetches the skills below from this repo and writes them to `~/.claude/skill
 
 ## Authentication model
 
-Every signed request carries:
+Requests are signed with **signing version 2**, the only version the platform accepts since 2026-10-11 (kdraigo-mcp v1.0.9+, dev_sdk v1.3.0+). Every signed request carries:
 
-- `X-Key-ID` — your Ed25519 key UUID
-- `X-Signature` — hex(ed25519(`METHOD\nPATH\nTIMESTAMP\nBODY`))
-- `X-Timestamp` — Unix seconds
+- `X-Key-ID`: your Ed25519 key UUID
+- `X-Timestamp`: Unix seconds, within 5 minutes of the server clock
+- `X-Nonce`: 32 hex characters, new for every request
+- `X-Signature`: hex(ed25519(`KDRAIGO-SIG-V2\nMETHOD\nPATH\nCANONICAL_QUERY\nTIMESTAMP\nNONCE\nhex(sha256(BODY))`))
 
-The backtester_engine endpoint uses uppercased variants (`X-API-KEY` / `X-SIGNATURE` / `X-TIMESTAMP`); the binary handles this automatically.
+Each signature is accepted once, so a retry signs again. The backtester_engine uses uppercased variants (`X-API-KEY` / `X-SIGNATURE` / `X-TIMESTAMP`, with the same `X-Nonce`), and its WebSocket sends them as headers on the upgrade, not in the URL. The binary handles all of this.
 
 ## Layout
 
@@ -101,7 +108,7 @@ kdraigo_mcp/
     config/                config.yaml loader
     auth/                  Ed25519 signer
     client/                signed HTTP + WS clients
-    tools/                 the 12 MCP tools, embedded SDK + indicator docs
+    tools/                 the 14 MCP tools, embedded SDK + indicator docs
   skills/                  open-source skills (canonical source)
 ```
 
