@@ -559,6 +559,50 @@ Below, the leading `exchange, symbol` are omitted; `pt` = `pointType`; return is
 
 Full reference with descriptions: `dev_sdk/indicators/README.md`.
 
+## plots
+
+A strategy can draw its own values on the session chart at kdraigo.com: its moving averages over the candles, an oscillator in a panel below them, a marker on the bar a signal fired. Needs dev_sdk v1.4.0+. **Backtests only for now**: in a live session the series accept values and drop them.
+
+```go
+import (
+    sdk "github.com/kdraigo/dev_sdk"
+    "github.com/kdraigo/dev_sdk/plots"
+    "github.com/kdraigo/dev_sdk/types"
+)
+
+// Declare once, before Start.
+fast, _ := s.Plot(plots.Def{Key: "ema_fast", Title: "EMA 50"})              // over the candles
+rsi, _ := s.Plot(plots.Def{Key: "rsi", Title: "RSI 14", Pane: "RSI",         // a panel of its own
+    Levels: []plots.Level{{Value: 70}, {Value: 30}}})
+hist, _ := s.Plot(plots.Def{Key: "macd_hist", Pane: "MACD", Kind: plots.Histogram, SignColors: true})
+bb, _ := s.Plot(plots.Def{Key: "bb", Title: "BB 20", Kind: plots.Band})
+cross, _ := s.Plot(plots.Def{Key: "cross", Kind: plots.Markers,
+    Marker: &plots.Marker{Shape: plots.ArrowUp, Position: plots.Below}})
+
+// Add a value per bar.
+s.SetOnCandleFor(types.Timeframe1h, func(ctx *types.Context, c *types.Candle) {
+    fast.Add(c, emaFast)
+    rsi.Add(c, rsiValue)
+    hist.Add(c, macd-signal)
+    bb.AddBand(c, upper, lower)
+    if crossedUp {
+        cross.Mark(c, "cross")
+    }
+})
+```
+
+- **Key**: lowercase letters, digits, `_ . -`, at most 64. The chart remembers a viewer's choices by it.
+- **Pane**: empty draws over the candles on their price scale (values in price units). Any other name is a panel below the candles; plots with the same `Pane` share it.
+- **Kind**: `plots.Line` (default), `Step`, `Histogram`, `Area`, `Band` (two values per bar, `AddBand`; the space between is filled) or `Markers` (`Mark`). `Levels` are dashed horizontal lines in the plot's panel; `SignColors` colours a histogram green at or above zero and red below.
+- **Colour**: `Color: "#rrggbb"`, or leave it empty for the chart's palette. `Hidden: true` starts a plot switched off. The viewer can show or hide any plot and change its colour, kind and width on the chart; the strategy's choices are the defaults.
+- A value belongs to its candle's exchange, pair and bar open time, so one plot serves every pair; the chart shows the selected pair's. Use `AddAt(exchange, pair, openTime, v)` for bars the strategy keeps itself, and set `Def.Timeframe`.
+- NaN and infinite values are skipped, so a warming-up indicator can be added unchecked. Adding a value twice for the same bar keeps the last.
+- `Plot` returns an error for a bad declaration, and a nil series that ignores every call, so plotting never breaks trading code. Declaring the same key again with the same `Def` returns the same series (one per-pair bot each may declare).
+- Values ride on the tick requests the SDK already sends, so they cost no extra round trip. They are stored with the session and count toward its storage.
+- On a chart coarser than the plot, each bar shows the plot's last value in it. On a finer chart a value is drawn on the last bar of its own bar, so the chart never shows a value before it existed.
+
+Limits: 32 plots and 8 panels per session, 8 levels per plot, marker text 32 characters. Plot storage per session is 8 MB basic / 64 MB verified / 256 MB admin (about 16 bytes a value: 500,000 values on basic); past it the run continues, one response carries a `warning`, and later values are not stored.
+
 ## limits
 
 The hosted backtester enforces these per session and per account. Normal strategies never come near them (the largest real session so far placed about 3,000 orders).
@@ -571,6 +615,7 @@ What an account may use depends on its tier. **basic** is a wallet only; **verif
 | Sessions at once (running, or waiting to be resumed) | 1 | 3 | 20 | Create returns 429, code `too_many_sessions`: let one finish or close it |
 | Orders per session | 20,000 | 100,000 | 1,000,000 | That order is refused with code `order_limit_reached` and the session ends `FAILED`; orders placed before it are kept |
 | Stored reasoning per session | 8 MB | 64 MB | 256 MB of `Reason` + `Logs` | Orders keep executing; one response carries `warning`, and later reasoning is not stored |
+| Stored plot values per session (`## plots`) | 8 MB | 64 MB | 256 MB | The run continues; one response carries `warning`, and later values are not stored |
 | Run time per session (parked time not counted) | 2 h | 4 h | 12 h | The session ends `FAILED`: "session run budget exceeded" |
 
 All basic accounts together share 4 running sessions and 10 GB of storage; when the pool is full, a basic account's create returns 503, code `capacity_exceeded`, until sessions finish or are deleted. Verified and admin accounts do not use the pool.
