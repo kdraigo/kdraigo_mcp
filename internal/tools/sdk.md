@@ -561,7 +561,7 @@ Full reference with descriptions: `dev_sdk/indicators/README.md`.
 
 ## plots
 
-A strategy can draw its own values on the session chart at kdraigo.com: its moving averages over the candles, an oscillator in a panel below them, a marker on the bar a signal fired. Needs dev_sdk v1.4.0+. **Backtests only for now**: in a live session the series accept values and drop them.
+A strategy can draw its own values on the session chart at kdraigo.com, backtest and live: its moving averages over the candles, an oscillator in a panel below them, a marker on the bar a signal fired. Needs dev_sdk v1.4.0+ for backtests and v1.5.0+ for live.
 
 ```go
 import (
@@ -601,7 +601,12 @@ s.SetOnCandleFor(types.Timeframe1h, func(ctx *types.Context, c *types.Candle) {
 - Values ride on the tick requests the SDK already sends, so they cost no extra round trip. They are stored with the session and count toward its storage.
 - On a chart coarser than the plot, each bar shows the plot's last value in it. On a finer chart a value is drawn on the last bar of its own bar, so the chart never shows a value before it existed.
 
-Limits: 32 plots and 8 panels per session, 8 levels per plot, marker text 32 characters. Plot storage per session is 8 MB basic / 64 MB verified / 256 MB admin (about 16 bytes a value: 500,000 values on basic); past it the run continues, one response carries a `warning`, and later values are not stored.
+**Live** (dev_sdk v1.5.0+): the same code, with `LiveOptions.TelemetryURL` set (`## live telemetry`). Without telemetry the series accept values and drop them.
+- The SDK sends what the strategy added every 2 s, as one signed `plots` event per send (up to 256 KB), so a portfolio's pairs closing the same bar cost one request.
+- A send that cannot reach the platform is kept and retried with backoff (up to a minute apart); one the platform refuses (4xx) is dropped. Declarations are re-sent every 10 minutes. On shutdown the SDK flushes before `session_stopped`.
+- The live console re-reads the newest bars every 15 s, so a bar's values appear shortly after it closes.
+
+Limits: 32 plots and 8 panels per session, 8 levels per plot, marker text 32 characters. Plot storage per session is 8 MB basic / 64 MB verified / 256 MB admin (about 16 bytes a value: 500,000 values on basic). Past it a **backtest** keeps running, one response carries a `warning`, and later values are not stored; a **live** session keeps its newest values and drops its oldest (the warning is logged by the SDK once).
 
 ## limits
 
@@ -615,7 +620,7 @@ What an account may use depends on its tier. **basic** is a wallet only; **verif
 | Sessions at once (running, or waiting to be resumed) | 1 | 3 | 20 | Create returns 429, code `too_many_sessions`: let one finish or close it |
 | Orders per session | 20,000 | 100,000 | 1,000,000 | That order is refused with code `order_limit_reached` and the session ends `FAILED`; orders placed before it are kept |
 | Stored reasoning per session | 8 MB | 64 MB | 256 MB of `Reason` + `Logs` | Orders keep executing; one response carries `warning`, and later reasoning is not stored |
-| Stored plot values per session (`## plots`) | 8 MB | 64 MB | 256 MB | The run continues; one response carries `warning`, and later values are not stored |
+| Stored plot values per session (`## plots`) | 8 MB | 64 MB | 256 MB | The run continues with a `warning`. A backtest stores no later values; a live session drops its oldest |
 | Run time per session (parked time not counted) | 2 h | 4 h | 12 h | The session ends `FAILED`: "session run budget exceeded" |
 
 All basic accounts together share 4 running sessions and 10 GB of storage; when the pool is full, a basic account's create returns 503, code `capacity_exceeded`, until sessions finish or are deleted. Verified and admin accounts do not use the pool.
