@@ -135,8 +135,14 @@ func renderReport(in *reportInputs) string {
 	doc.Line("Avg win %s · avg loss %s · best %s · worst %s · liquidations %d · open at end %d",
 		optSigned(t.AvgWin), optSigned(t.AvgLoss), optSigned(t.BestTrade), optSigned(t.WorstTrade), t.Liquidations, t.OpenAtEnd)
 	doc.Line("Orders placed/filled/canceled: %s", orderTallies(&t.Orders))
+	if p.ReportVersion >= 2 {
+		renderResearch(doc, p)
+	}
 
 	warnings := reportWarnings(in)
+	if p.ReportVersion >= 2 {
+		warnings = serverWarnings(in)
+	}
 	if len(warnings) > 0 {
 		doc.Blank()
 		doc.Line("## warnings")
@@ -152,12 +158,13 @@ func renderReport(in *reportInputs) string {
 			s.Exchange, s.Pair, s.Model, render.Signed(s.NetPnL, 2), signedPct(s.ReturnPct),
 			render.Int(s.Trades), fmt.Sprintf("%d/%d", s.LongTrades, s.ShortTrades), rate(s.Wins, s.Trades),
 			render.Opt(s.ProfitFactor, 2), optSigned(s.AvgWin), optSigned(s.AvgLoss),
-			render.OptPct(s.MaxDrawdownPct, 1), render.Num(s.Fees, 2), render.Num(s.Funding, 2),
+			render.OptPct(s.MaxDrawdownPct, 1), render.Opt(s.ReturnToDD, 2), signedOpt(s.AvgR, 2),
+			render.Num(s.Fees, 2), render.Num(s.Funding, 2),
 			render.Int(s.Liquidations), render.Int(s.OpenAtEnd),
 		})
 	}
 	doc.Table(fmt.Sprintf("instruments (%d), busiest first; return is each one's share of the session's return", len(p.Instruments)),
-		[]string{"exchange", "pair", "model", "net", "return", "trades", "L/S", "win", "pf", "avg_win", "avg_loss", "max_dd", "fees", "funding", "liq", "open"},
+		[]string{"exchange", "pair", "model", "net", "return", "trades", "L/S", "win", "pf", "avg_win", "avg_loss", "max_dd", "ret/dd", "avg_r", "fees", "funding", "liq", "open"},
 		rows, nil)
 
 	doc.Blank()
@@ -349,6 +356,82 @@ func reportWarnings(in *reportInputs) []string {
 	return out
 }
 
+// renderResearch adds what report version 2 measures: R, how much the result
+// rests on a few trades, how long it stayed down, and the daily ratios.
+func renderResearch(doc *render.Doc, p *performanceReport) {
+	t := &p.Total
+	if t.RTrades > 0 {
+		doc.Line("R (net, per trade with an initial stop): avg %s ± %s (std err) over %d of %d trades · sum %s · winners over 5R %d",
+			signedOpt(t.AvgR, 3), render.Opt(t.RSE, 3), t.RTrades, t.Trades, signedOpt(t.SumR, 1), t.WinnersOver5R)
+	} else {
+		doc.Line("R: no trade has an initial stop (a protective STOP_LOSS, or `stop` in the entry order's reason)")
+	}
+	doc.Line("Without the 5 best trades net is %s (they are %s of net) · longest losing streak %d · longest underwater %s days · exposure %s · avg hold %s",
+		signedOpt(t.NetWithoutTop5, 2), optShare(t.Top5Share), t.LongestLosingStreak,
+		render.Opt(t.LongestUnderwaterDays, 1), render.OptPct(t.ExposurePct, 0), holdOpt(t.AvgHoldSec))
+	months := fmt.Sprintf("%d months, %d losing", t.Months, t.LosingMonths)
+	if t.WorstMonth != nil {
+		months += fmt.Sprintf(", worst %s %s", t.WorstMonth.Key, render.Signed(t.WorstMonth.Net, 2))
+	}
+	r := &p.Ratios
+	doc.Line("Daily ratios over %d days: Sharpe %s · Sortino %s · CAGR %s · Calmar %s · %s · instruments positive %d of %d",
+		r.Days, render.Opt(r.Sharpe, 2), render.Opt(r.Sortino, 2), signedPctOpt(r.CAGR), render.Opt(r.Calmar, 2),
+		months, p.InstrumentsPositive, len(p.Instruments))
+}
+
+// serverWarnings are the report's own, plus what only this tool knows.
+func serverWarnings(in *reportInputs) []string {
+	var out []string
+	for _, w := range in.perf.Warnings {
+		out = append(out, fmt.Sprintf("[%s] %s", w.Severity, w.Message))
+	}
+	if in.detail == nil && in.detailErr != nil {
+		out = append(out, fmt.Sprintf("Session record not available: %v", in.detailErr))
+	}
+	return out
+}
+
+func signedOpt(v *float64, dp int) string {
+	if v == nil {
+		return render.Dash
+	}
+	return render.Signed(*v, dp)
+}
+
+func signedPctOpt(v *float64) string {
+	if v == nil {
+		return render.Dash
+	}
+	return render.Signed(*v, 1) + "%"
+}
+
+// optShare is a fraction as a percentage.
+func optShare(v *float64) string {
+	if v == nil {
+		return render.Dash
+	}
+	return render.Pct(*v*100, 0)
+}
+
+func holdOpt(sec *float64) string {
+	if sec == nil {
+		return render.Dash
+	}
+	return hold(int64(*sec))
+}
+
+// hold is a holding time as one rounded unit: 45m, 6.5h, 3.2d.
+func hold(sec int64) string {
+	d := time.Duration(sec) * time.Second
+	switch {
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 48*time.Hour:
+		return render.Num(d.Hours(), 1) + "h"
+	}
+	return render.Num(d.Hours()/24, 1) + "d"
+}
+
 func signedPct(v *float64) string {
 	if v == nil {
 		return render.Dash
@@ -403,5 +486,9 @@ func orderTallies(b *orderBreakdown) string {
 }
 
 func tally(t orderTally) string {
-	return fmt.Sprintf("%d/%d/%d", t.Placed, t.Filled, t.Canceled)
+	s := fmt.Sprintf("%d/%d/%d", t.Placed, t.Filled, t.Canceled)
+	if t.Rejected > 0 {
+		s += fmt.Sprintf(" (%d rejected)", t.Rejected)
+	}
+	return s
 }

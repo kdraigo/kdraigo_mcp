@@ -91,7 +91,7 @@ func TestAnnotationsSayWhatEachToolDoes(t *testing.T) {
 	t.Setenv(ReplayEnv, "1")
 	s := backend(t, nil)
 	destructive := map[string]bool{"delete_session": true, "update_session_metadata": true}
-	writes := map[string]bool{"scaffold_strategy": true, "create_backtest_session": true, "run_backtest_stream": true, "get_session_orders": true}
+	writes := map[string]bool{"scaffold_strategy": true, "create_backtest_session": true, "run_backtest_stream": true, "get_session_orders": true, "get_trades": true}
 	for name, st := range s.ListTools() {
 		a := st.Tool.Annotations
 		assert.Equal(t, destructive[name], *a.DestructiveHint, "%s destructive", name)

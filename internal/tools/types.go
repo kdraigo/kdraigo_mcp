@@ -153,6 +153,7 @@ type orderTally struct {
 	Placed   int `json:"placed"`
 	Filled   int `json:"filled"`
 	Canceled int `json:"canceled"`
+	Rejected int `json:"rejected"`
 }
 
 type orderBreakdown struct {
@@ -202,6 +203,47 @@ type stats struct {
 	OpenAtEnd      int            `json:"open_at_end"`
 	OpenPosition   *openPosition  `json:"open_position"`
 	Orders         orderBreakdown `json:"orders"`
+
+	// Report version 2.
+	OpenAtEndPnL          float64   `json:"open_at_end_pnl"`
+	OpenAtEndShare        *float64  `json:"open_at_end_share"`
+	ClosedAtEnd           int       `json:"closed_at_end"`
+	ReturnToDD            *float64  `json:"return_to_dd"`
+	Expectancy            *float64  `json:"expectancy"`
+	PFInclOpen            *float64  `json:"pf_incl_open"`
+	AvgR                  *float64  `json:"avg_r"`
+	RSE                   *float64  `json:"r_se"`
+	SumR                  *float64  `json:"sum_r"`
+	RTrades               int       `json:"r_trades"`
+	WinnersOver5R         int       `json:"winners_over_5r"`
+	NetWithoutTop5        *float64  `json:"net_without_top5"`
+	Top5Share             *float64  `json:"top5_share"`
+	LongestLosingStreak   int       `json:"longest_losing_streak"`
+	LongestUnderwaterDays *float64  `json:"longest_underwater_days"`
+	AvgHoldSec            *float64  `json:"avg_hold_sec"`
+	ExposurePct           *float64  `json:"exposure_pct"`
+	Months                int       `json:"months"`
+	LosingMonths          int       `json:"losing_months"`
+	WorstMonth            *monthNet `json:"worst_month"`
+}
+
+type monthNet struct {
+	Key string  `json:"key"`
+	Net float64 `json:"net"`
+}
+
+type ratios struct {
+	Days    int      `json:"days"`
+	Sharpe  *float64 `json:"sharpe"`
+	Sortino *float64 `json:"sortino"`
+	CAGR    *float64 `json:"cagr_pct"`
+	Calmar  *float64 `json:"calmar"`
+}
+
+type reportWarning struct {
+	Code     string `json:"code"`
+	Severity string `json:"severity"`
+	Message  string `json:"message"`
 }
 
 type performanceReport struct {
@@ -212,6 +254,82 @@ type performanceReport struct {
 	UnpricedAssets []string `json:"unpriced_assets"`
 	Total          stats    `json:"total"`
 	Instruments    []stats  `json:"instruments"`
+
+	// Report version 2; zero from an older analytics_service, which has
+	// none of what follows.
+	ReportVersion       int             `json:"report_version"`
+	InstrumentsPositive int             `json:"instruments_positive"`
+	Ratios              ratios          `json:"ratios"`
+	Warnings            []reportWarning `json:"warnings"`
+}
+
+// analytics_service /analytics/trades and /analytics/breakdown (report
+// version 2).
+
+type trade struct {
+	ID           int        `json:"id"`
+	Exchange     string     `json:"exchange"`
+	Pair         string     `json:"pair"`
+	Side         string     `json:"side"`
+	EntryAt      time.Time  `json:"entry_at"`
+	ExitAt       *time.Time `json:"exit_at"`
+	HoldSec      int64      `json:"hold_sec"`
+	EntryPx      float64    `json:"entry_px"`
+	ExitPx       *float64   `json:"exit_px"`
+	QtyEntry     float64    `json:"qty_entry"`
+	QtyPeak      float64    `json:"qty_peak"`
+	Adds         int        `json:"adds"`
+	Partials     int        `json:"partials"`
+	Gross        float64    `json:"gross"`
+	Fees         float64    `json:"fees"`
+	Funding      float64    `json:"funding"`
+	Net          float64    `json:"net"`
+	StopPx       *float64   `json:"stop_px"`
+	FinalStopPx  *float64   `json:"final_stop_px"`
+	Risk         *float64   `json:"risk"`
+	NetR         *float64   `json:"net_r"`
+	GrossR       *float64   `json:"gross_r"`
+	RSource      string     `json:"r_source"`
+	ExitKind     string     `json:"exit_kind"`
+	Liquidated   bool       `json:"liquidated"`
+	OpenAtEnd    bool       `json:"open_at_end"`
+	ClosedAtEnd  bool       `json:"closed_at_end"`
+	Inherited    bool       `json:"inherited"`
+	Reconciled   *bool      `json:"reconciled"`
+	EntryOrderID string     `json:"entry_order_id"`
+	ExitOrderID  string     `json:"exit_order_id"`
+}
+
+type tradesPage struct {
+	ReportVersion int             `json:"report_version"`
+	Total         int             `json:"total"`
+	Limit         int             `json:"limit"`
+	Offset        int             `json:"offset"`
+	Trades        []trade         `json:"trades"`
+	Warnings      []reportWarning `json:"warnings"`
+}
+
+type bucket struct {
+	Key          string   `json:"key"`
+	Trades       int      `json:"trades"`
+	Wins         int      `json:"wins"`
+	WinRate      *float64 `json:"win_rate"`
+	Net          float64  `json:"net"`
+	Gross        float64  `json:"gross"`
+	Fees         float64  `json:"fees"`
+	Funding      float64  `json:"funding"`
+	ProfitFactor *float64 `json:"pf"`
+	AvgR         *float64 `json:"avg_r"`
+	RSE          *float64 `json:"r_se"`
+	SumR         *float64 `json:"sum_r"`
+	RTrades      int      `json:"r_trades"`
+}
+
+type breakdownResponse struct {
+	By      string   `json:"by"`
+	At      string   `json:"at"`
+	Buckets []bucket `json:"buckets"`
+	Total   bucket   `json:"total"`
 }
 
 type seriesPoint struct {

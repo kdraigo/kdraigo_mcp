@@ -54,7 +54,7 @@ Other MCP clients (or a project's `.mcp.json`) take the usual entry:
 }
 ```
 
-Restart the client. The tools below appear under the `kdraigo` server: 14 by default, 16 with the replay switch.
+Restart the client. The tools below appear under the `kdraigo` server: 16 by default, 18 with the replay switch.
 
 The two replay tools, `create_backtest_session` and `run_backtest_stream`, are off unless the server runs with `KDRAIGO_MCP_ENABLE_REPLAY=1`. They step candles through a session without running any strategy code, so they are not how a strategy is backtested: a strategy runs as its own program (`go run .`) through dev_sdk. A replay left parked also holds one of the account's session slots for up to an hour.
 
@@ -81,7 +81,9 @@ Results come back as a few header lines and tab-separated tables, with no JSON, 
 | `get_sdk_docs` | Returns the embedded dev_sdk reference. Pass `section` to scope. |
 | `get_indicator_docs` | Deep per-indicator reference (purpose, calculation, signals, usage). Pass `name` to scope to one indicator or category. |
 | `scaffold_strategy` | `git clone`s a template from [`example_strategy`](https://github.com/kdraigo/example_strategy) into a target dir. |
-| `get_session_report` | A backtest's or live session's results in one call: return, drawdown, return/DD, P&L split, trades and win rate per side, a table per instrument, P&L per month, and warnings (unfinished run, missing candles, few trades, open positions, concentration, costs). |
+| `get_session_report` | A backtest's or live session's results in one call: return, drawdown, return/DD, P&L split, trades and win rate per side, average R with its standard error, net without the 5 best trades, losing streak, time underwater, daily Sharpe/Sortino/Calmar, a table per instrument, P&L per month, and the platform's warnings (unfinished run, missing candles, few trades, no stops, open positions, concentration). |
+| `get_trades` | Every trade with entry, exit, net, initial stop and R; filter, sort by net or R, or `save_to` a CSV. Needs analytics_service with report version 2. |
+| `get_breakdown` | Trades grouped by period, instrument, side, exit kind, holding time, weekday or hour, each group with win rate, net, profit factor and R. |
 | `list_sessions` | The caller's sessions, newest first, with status and progress. |
 | `get_session_detail` | One session's record: window, progress, starting wallets, instruments with fills and fees. |
 | `get_session_orders` | Orders filtered by instrument, status, role and time; `with_reason` adds the strategy's reason and logs; `save_to` writes every match to a local CSV. |

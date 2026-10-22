@@ -25,7 +25,9 @@ Capture that id; every result tool takes it. The window, instruments, wallets an
 4. **Run.** `go run .` from the strategy folder; for anything longer than a few minutes, run it in the background and capture the log. Take the session id from the log line above. `get_session_detail` or `list_sessions` show status and progress while it runs.
 5. **Report.** `get_session_report` first, every time. **Read its warnings before its numbers.** An unfinished run, missing candles, positions open at the end or a result carried by one trade change what the numbers mean.
 6. **Drill down** only as far as the question needs:
-   - `get_session_orders`: filter by `role` (`stop_loss`, `take_profit`, …), `status`, `pair`, time. Add `with_reason` (≤50 rows) to see why the strategy acted. Use `save_to=/abs/path/orders.csv` to get every order for your own analysis.
+   - `get_trades`: one row per trade, with entry and exit, net, the initial stop and R. Use `sort=net` or `sort=net_r` to see the trades that made or broke the result, and filter by `side`, `exit_kind` or instrument. `save_to=/abs/path/trades.csv` gets every trade for your own analysis.
+   - `get_breakdown`: trades grouped by `month`, `quarter`, `instrument`, `side`, `exit_kind`, `hold`, `weekday` or `hour`. Use `at=entry` to ask when entries work rather than when exits land.
+   - `get_session_orders`: filter by `role` (`stop_loss`, `take_profit`, …), `status`, `pair`, time. Add `with_reason` (≤50 rows) to see why the strategy acted. `save_to` writes every order to a CSV.
    - `get_session_positions` / `get_session_funding`: futures only; paged.
    - `get_analytics_series`: `type=equity` or `drawdown`, `timeframe=1h` or `1d`, optionally `exchange` + `pair` for one instrument.
 7. **Record.** `update_session_metadata` on every run you keep: a `name` that says the variant, `notes` with the hypothesis and the verdict, `tags` such as `exp:<slug>`, `baseline`, `variant:<x>`.
@@ -37,8 +39,9 @@ Capture that id; every result tool takes it. The window, instruments, wallets an
 - **Enough trades.** Below about 30 closed trades, win rate and profit factor are noise. Per instrument it needs even more.
 - **Breadth.** Count the instruments with positive net (x of N). A result made by one coin is about that coin.
 - **Time.** Look at the months table for the worst month, the number of losing months and the longest losing run. One great month can make a year.
-- **Fat tails.** If the best trade is a large share of net P&L, recompute without the top 5 trades (from the orders CSV) before believing it.
-- **R multiples.** For per-trade quality, compute R = net / initial risk from the orders CSV. Initial risk is |entry − stop| × size, and the stop is the entry order's `reason.stop` or the first opposite-side `STOP_LOSS` order's `stop_price`. Report the average R with its standard error, not just the mean.
+- **Fat tails.** The report gives net without the 5 best trades. If that is negative, the result is a handful of trades; `get_trades sort=net` shows which.
+- **R multiples.** The report's average R (net over the risk to the initial stop) comes with its standard error. An average under two standard errors from zero is not an edge yet. R needs an initial stop on every trade: if the report says R covers few trades, add the stop (see below) before judging per-trade quality.
+- **Daily ratios.** Sharpe, Sortino and Calmar come from daily closed-trade equity, so they understate volatility inside trades. Use them to rank variants on the same window, not as absolute claims.
 - **Open at end.** Positions still open at the end are valued at their last fill. If they are a big share of the result, the result is unfinished.
 
 ## Pitfalls
@@ -48,7 +51,7 @@ Capture that id; every result tool takes it. The window, instruments, wallets an
 - **End-of-run settlement.** Trades closed by the end of the window are not exits the strategy chose.
 - **In-sample selection.** Choosing coins, parameters or sessions by how they did on the same window you report is fitting. Choose on train, report on test.
 - **Multiple comparisons.** Every variant you try is a draw. After ten tries, the best of ten beating the baseline is expected by chance. Keep count and say it.
-- **Costs left out.** Fees and funding are in net P&L, but a hand-computed R from prices alone leaves them out. Say which you used.
+- **Costs left out.** Net R includes fees and funding; gross R (in the trades CSV) does not. Say which you used.
 - **Small wallets.** A tiny balance skips trades that round to zero size, or that fall below the exchange minimum. Check the order count against what the logic should have sent.
 - **One regime.** A window that is all trend or all chop tells you about that regime. Test across at least two.
 - **The hold-out is used once.** After you look at it, it is no longer a hold-out.
@@ -56,7 +59,7 @@ Capture that id; every result tool takes it. The window, instruments, wallets an
 ## Conventions that make the tools more useful
 
 - Put the decision context in each order's `Reason` (a map, ≤4 KB) and short `Logs` lines (≤16 KB). They come back with `with_reason` and in the CSV.
-- **Entry orders carry `reason.stop`:** the initial stop price, as a number. Risk and R are computed from it, even when the protective stop is placed a bar later.
+- **Entry orders carry `reason.stop`:** the initial stop price, as a number. R is measured to the first protective stop order placed before the trade starts to exit; without one, this `stop` stands in.
 - Protective stops are `STOP_LOSS` orders with both `StopPrice` and `Price` set; the backtest engine rejects a stop with only a trigger.
 
 ## Output style

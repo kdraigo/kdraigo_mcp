@@ -14,9 +14,13 @@ import (
 	"github.com/kdraigo/kdraigo_mcp/internal/render"
 )
 
-// RegisterAnalytics adds get_session_report, get_analytics_types and get_analytics_series, all via analytics_service's /dev path.
+// RegisterAnalytics adds get_session_report, get_trades, get_breakdown,
+// get_analytics_types and get_analytics_series, all via analytics_service's
+// /dev path.
 func RegisterAnalytics(s *server.MCPServer, d Deps) {
 	addGetSessionReport(s, d)
+	addGetTrades(s, d)
+	addGetBreakdown(s, d)
 	addGetAnalyticsTypes(s, d)
 	addGetAnalyticsSeries(s, d)
 }
