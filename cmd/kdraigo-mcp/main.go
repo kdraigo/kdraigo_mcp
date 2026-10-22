@@ -35,7 +35,7 @@ func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "install-skill":
-			if err := installSkill(); err != nil {
+			if err := installSkill(os.Args[2:], os.Stdout); err != nil {
 				fmt.Fprintln(os.Stderr, "install-skill:", err)
 				os.Exit(1)
 			}
@@ -63,12 +63,7 @@ func main() {
 	deps := tools.Deps{HTTP: httpClient}
 
 	s := server.NewMCPServer("kdraigo", resolveVersion())
-	tools.RegisterDocs(s)
-	tools.RegisterScaffold(s)
-	tools.RegisterSessions(s, deps)
-	tools.RegisterAnalytics(s, deps)
-	tools.RegisterCandles(s, deps)
-	tools.RegisterBacktest(s, deps)
+	tools.Register(s, deps)
 
 	if err := server.ServeStdio(s); err != nil {
 		fmt.Fprintln(os.Stderr, "stdio:", err)
@@ -81,7 +76,8 @@ func printHelp() {
 
 Usage:
   kdraigo-mcp                  Start the stdio MCP server (default; called by Claude Code).
-  kdraigo-mcp install-skill    Copy the kdraigo-strategy skill into ~/.claude/skills/.
+  kdraigo-mcp install-skill [--project <dir>]
+                               Install the skills into ~/.claude/skills/ (or <dir>/.claude/skills/).
   kdraigo-mcp version          Print version.
   kdraigo-mcp help             Show this help.
 
@@ -91,5 +87,9 @@ Configuration:
       key_id: <uuid>
       private_key: <ed25519-hex>
     endpoint: https://kdraigo.com              # optional; gateway for data/analytics
-    backtester_endpoint: https://api.kdraigo.com  # optional; backtester_engine host`)
+    backtester_endpoint: https://api.kdraigo.com  # optional; backtester_engine host
+
+Environment:
+  KDRAIGO_MCP_ENABLE_REPLAY=1  Also serve create_backtest_session and run_backtest_stream,
+                               which replay candles without running strategy code.`)
 }

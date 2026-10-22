@@ -54,39 +54,46 @@ Other MCP clients (or a project's `.mcp.json`) take the usual entry:
 }
 ```
 
-Restart the client. The 14 tools below appear under the `kdraigo` server.
+Restart the client. The tools below appear under the `kdraigo` server: 14 by default, 16 with the replay switch.
+
+The two replay tools, `create_backtest_session` and `run_backtest_stream`, are off unless the server runs with `KDRAIGO_MCP_ENABLE_REPLAY=1`. They step candles through a session without running any strategy code, so they are not how a strategy is backtested: a strategy runs as its own program (`go run .`) through dev_sdk. A replay left parked also holds one of the account's session slots for up to an hour.
 
 ## Install the skills
 
 ```bash
-kdraigo-mcp install-skill
+kdraigo-mcp install-skill                    # ~/.claude/skills/<name>/SKILL.md
+kdraigo-mcp install-skill --project <dir>    # <dir>/.claude/skills/<name>/SKILL.md
 ```
 
-This fetches the skills below from this repo and writes them to `~/.claude/skills/`. Reload Claude Code to see them.
+The skills are built into the binary, so they always match its tools. Restart Claude Code to load them. Releases before v1.1.0 wrote flat `~/.claude/skills/<name>.md` files that Claude Code never loaded; the installer names any it finds so you can delete them.
 
-- [`kdraigo-strategy`](skills/kdraigo-strategy.md) — the scaffold → backtest → analyze → iterate loop.
+- [`kdraigo-strategy`](skills/kdraigo-strategy.md) — write the hypothesis → `go run .` → report → drill down → record → iterate loop, how to judge a result, and the pitfalls.
 - [`kdraigo-indicators`](skills/kdraigo-indicators.md) — choose the right technical indicator by intent and wire it via the SDK.
 
 ---
 
 ## Tools
 
+Results come back as a few header lines and tab-separated tables, with no JSON, so a page of rows fits the client's tool-output limit. A result stops at about 60 KB and its last line says how to get the rest (`offset`, or `save_to` for orders).
+
 | Tool | What it does |
 | ---- | ------------ |
 | `get_sdk_docs` | Returns the embedded dev_sdk reference. Pass `section` to scope. |
 | `get_indicator_docs` | Deep per-indicator reference (purpose, calculation, signals, usage). Pass `name` to scope to one indicator or category. |
 | `scaffold_strategy` | `git clone`s a template from [`example_strategy`](https://github.com/kdraigo/example_strategy) into a target dir. |
-| `create_backtest_session` | POSTs `/api/v1/dev/session` on backtester_engine, returns a session ID. |
-| `run_backtest_stream` | Drives a session to completion via WS. Returns aggregate stats. |
-| `list_sessions` | Paginated session list from frontend_api. |
-| `get_session_detail` | Single session's metadata and wallet snapshots. |
-| `get_session_positions` | Futures positions a session held, oldest first (empty for spot). |
-| `get_session_funding` | Funding ledger for a session, one row per settlement (empty for spot). |
+| `get_session_report` | A backtest's or live session's results in one call: return, drawdown, return/DD, P&L split, trades and win rate per side, a table per instrument, P&L per month, and warnings (unfinished run, missing candles, few trades, open positions, concentration, costs). |
+| `list_sessions` | The caller's sessions, newest first, with status and progress. |
+| `get_session_detail` | One session's record: window, progress, starting wallets, instruments with fills and fees. |
+| `get_session_orders` | Orders filtered by instrument, status, role and time; `with_reason` adds the strategy's reason and logs; `save_to` writes every match to a local CSV. |
+| `get_session_positions` | Futures positions a session held, paged, with open and liquidated counts (empty for spot). |
+| `get_session_funding` | Funding ledger, one row per settlement, paged, with totals (empty for spot). |
 | `update_session_metadata` | Patches `name`, `notes`, `tags`, `favorite`. |
 | `delete_session` | Removes a session and its data. |
-| `get_analytics_types` | Lists available metric types (equity, trading_frequency, etc.). |
-| `get_analytics_series` | Time-bucketed series for a session metric. |
+| `get_analytics_types` | Lists available metric types (equity, drawdown, trading_frequency, etc.). |
+| `get_analytics_series` | Time-bucketed series for a session metric, whole session or one instrument; at most 2,000 buckets. |
 | `get_candles` | OHLCV from data_provider (public endpoint, no signing). |
+| `create_backtest_session` | Replay only (`KDRAIGO_MCP_ENABLE_REPLAY=1`): creates a session on backtester_engine. |
+| `run_backtest_stream` | Replay only: steps a session to its end over WS without running strategy code. |
 
 ## Authentication model
 
@@ -108,8 +115,9 @@ kdraigo_mcp/
     config/                config.yaml loader
     auth/                  Ed25519 signer
     client/                signed HTTP + WS clients
-    tools/                 the 14 MCP tools, embedded SDK + indicator docs
-  skills/                  open-source skills (canonical source)
+    render/                header + TSV rendering under the output cap
+    tools/                 the MCP tools, embedded SDK + indicator docs
+  skills/                  the skills, embedded into the binary
 ```
 
 ## Templates

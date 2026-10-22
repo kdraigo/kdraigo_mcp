@@ -1,66 +1,83 @@
 package main
 
 import (
-	"context"
+	"flag"
 	"fmt"
 	"io"
-	"net/http"
+	"io/fs"
 	"os"
 	"path/filepath"
-	"time"
+	"strings"
+
+	"github.com/kdraigo/kdraigo_mcp/skills"
 )
 
-const skillBaseURL = "https://raw.githubusercontent.com/kdraigo/kdraigo_mcp/main/skills/"
-
-// skillFiles are the skills copied into ~/.claude/skills/ by install-skill.
-var skillFiles = []string{
-	"kdraigo-strategy.md",
-	"kdraigo-indicators.md",
-}
-
-func installSkill() error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("home dir: %w", err)
-	}
-	dir := filepath.Join(home, ".claude", "skills")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("mkdir %s: %w", dir, err)
+// installSkill writes the embedded skills where Claude Code looks for them:
+// ~/.claude/skills/<name>/SKILL.md, or <dir>/.claude/skills/<name>/SKILL.md
+// with --project <dir>.
+func installSkill(args []string, out io.Writer) error {
+	flags := flag.NewFlagSet("install-skill", flag.ContinueOnError)
+	flags.SetOutput(out)
+	project := flags.String("project", "", "install into `dir`/.claude/skills instead of ~/.claude/skills")
+	if err := flags.Parse(args); err != nil {
+		return err
 	}
 
-	for _, name := range skillFiles {
-		if err := fetchSkill(dir, name); err != nil {
+	var root string
+	if *project != "" {
+		dir, err := filepath.Abs(*project)
+		if err != nil {
 			return err
 		}
+		if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+			return fmt.Errorf("--project %s is not a directory", dir)
+		}
+		root = filepath.Join(dir, ".claude", "skills")
+	} else {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("home dir: %w", err)
+		}
+		root = filepath.Join(home, ".claude", "skills")
 	}
+	return writeSkills(skills.FS, root, out)
+}
+
+func writeSkills(src fs.FS, root string, out io.Writer) error {
+	entries, err := fs.ReadDir(src, ".")
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".md" {
+			continue
+		}
+		data, err := fs.ReadFile(src, e.Name())
+		if err != nil {
+			return err
+		}
+		name := strings.TrimSuffix(e.Name(), ".md")
+		dir := filepath.Join(root, name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("mkdir %s: %w", dir, err)
+		}
+		dst := filepath.Join(dir, "SKILL.md")
+		if err := os.WriteFile(dst, data, 0o644); err != nil {
+			return fmt.Errorf("write %s: %w", dst, err)
+		}
+		fmt.Fprintln(out, "installed", dst)
+
+		// Releases before v1.1.0 wrote <name>.md straight into the skills
+		// folder, which Claude Code does not load.
+		if old := filepath.Join(root, e.Name()); fileExists(old) {
+			fmt.Fprintf(out, "  %s is an older install that Claude Code never loaded; remove it\n", old)
+		}
+	}
+	fmt.Fprintln(out, "Restart Claude Code to load them.")
 	return nil
 }
 
-func fetchSkill(dir, name string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	url := skillBaseURL + name
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return fmt.Errorf("new request: %w", err)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("fetch %s: %w", url, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("fetch %s: status %d", url, resp.StatusCode)
-	}
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("read body: %w", err)
-	}
-
-	dst := filepath.Join(dir, name)
-	if err := os.WriteFile(dst, data, 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", dst, err)
-	}
-	fmt.Println("installed", dst)
-	return nil
+func fileExists(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && fi.Mode().IsRegular()
 }

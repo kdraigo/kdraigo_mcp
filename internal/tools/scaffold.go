@@ -24,8 +24,10 @@ func RegisterScaffold(s *server.MCPServer) {
 		mcp.WithString("name", mcp.Required(), mcp.Description("Project name; becomes the destination dir basename. Letters, digits, _ and -.")),
 		mcp.WithString("template", mcp.Description("Template to use; defaults to 'basic'"), mcp.DefaultString("basic"), mcp.Enum("basic", "with-indicators", "with-risk-manager")),
 		mcp.WithString("dir", mcp.Required(), mcp.Description("Absolute path to the parent directory where the project will be created")),
+		additive(false),
 	)
-	add(s, tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	// A clone over a slow link takes longer than a backend call.
+	addTimeout(s, tool, heavyTimeout, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		name, err := req.RequireString("name")
 		if err != nil {
 			return toolErr(err), nil

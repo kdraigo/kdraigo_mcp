@@ -22,6 +22,7 @@ func RegisterDocs(s *server.MCPServer) {
 	tool := mcp.NewTool("get_sdk_docs",
 		mcp.WithDescription("Return embedded kdraigo dev_sdk documentation. Optional `section` filters to a single H2 heading (case-insensitive substring match)."),
 		mcp.WithString("section", mcp.Description("Optional section name to return only that section.")),
+		readOnly(), local(),
 	)
 	add(s, tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		section := strings.TrimSpace(req.GetString("section", ""))
@@ -42,6 +43,7 @@ func RegisterDocs(s *server.MCPServer) {
 	indTool := mcp.NewTool("get_indicator_docs",
 		mcp.WithDescription("Return the in-depth indicator reference for the kdraigo dev_sdk (what each indicator is for, how it's calculated, what it signals, and how to use it), plus the pointType/maType explanation. Optional `name` returns just one indicator (e.g. \"RSI\", \"BB\", \"MACD\") or one category heading (e.g. \"momentum\", \"volatility\"), case-insensitive."),
 		mcp.WithString("name", mcp.Description("Optional indicator name or category to return only that section.")),
+		readOnly(), local(),
 	)
 	add(s, indTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		name := strings.TrimSpace(req.GetString("name", ""))

@@ -86,6 +86,7 @@ func addCreateBacktestSession(s *server.MCPServer, d Deps) {
 		mcp.WithString("mark_price_source", mcp.Description("What liquidation triggers on: 'mark_series' (default, and what a real exchange uses) or 'trade_close'. The two diverge by up to 1.3% at the bar low on real data, so trade_close misses liquidations a real venue would have hit."), mcp.Enum("mark_series", "trade_close")),
 		mcp.WithBoolean("funding_enabled", mcp.Description("Charge perpetual funding. Default true. Turning it off is a directional bias, not a simplification — it flatters whichever side was being paid over the window.")),
 		mcp.WithString("contract_specs_version", mcp.Description("Pins the maintenance-margin ladder so a stored result stays reproducible after the exchange revises its tiers, e.g. binance_futures/2026-08-28. Empty uses the newest capture.")),
+		additive(false),
 	)
 	add(s, tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		exchange, err := req.RequireString("exchange")
@@ -199,8 +200,10 @@ func addRunBacktestStream(s *server.MCPServer, d Deps) {
 		mcp.WithDescription("Drive a backtest session to completion by sending `next` actions over WS. Returns aggregate stats; no strategy logic is executed server-side. Use this to bake-out a passive bot or to confirm the data range is loadable."),
 		mcp.WithString("session_id", mcp.Required(), mcp.Description("Session UUID returned by create_backtest_session")),
 		mcp.WithNumber("max_candles", mcp.Description("Safety cap on candles processed; 0 means no cap"), mcp.DefaultNumber(0)),
+		additive(false),
 	)
-	add(s, tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	// No deadline: the stream runs as long as its session does.
+	addTimeout(s, tool, 0, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		sessionID, err := req.RequireString("session_id")
 		if err != nil {
 			return toolErr(err), nil

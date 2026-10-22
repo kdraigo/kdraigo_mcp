@@ -50,7 +50,9 @@ func NewHTTP(endpoint, backtesterEndpoint string, signer *auth.Signer) *HTTP {
 		endpoint:           strings.TrimRight(endpoint, "/"),
 		backtesterEndpoint: strings.TrimRight(backtesterEndpoint, "/"),
 		signer:             signer,
-		hc:                 &http.Client{Timeout: 60 * time.Second},
+		// No client-wide timeout: each tool bounds its own call, and a
+		// report over a long session can take longer than a page of orders.
+		hc: &http.Client{},
 	}
 }
 

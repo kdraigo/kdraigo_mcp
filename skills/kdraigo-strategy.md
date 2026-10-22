@@ -1,34 +1,64 @@
 ---
 name: kdraigo-strategy
-description: End-to-end strategy development loop on the kdraigo trading platform. Use when the user wants to scaffold, backtest, analyze, or iterate on a Go trading strategy that runs against kdraigo.
+description: Develop, backtest and judge Go trading strategies on the kdraigo platform through the kdraigo MCP server. Use when the user wants to scaffold a strategy, run or analyse a backtest, compare runs, decide whether a change helped, or names a kdraigo session id.
 ---
 
 # kdraigo-strategy
 
-You are operating against the kdraigo algorithmic trading platform via the `kdraigo` MCP server. Every platform interaction goes through MCP tools; do not curl endpoints or invent client code.
+You develop strategies on the kdraigo platform. Platform data comes through the `kdraigo` MCP tools; do not curl endpoints or write client code for them.
 
-## When to invoke
+## How a strategy runs
 
-The user says any of: "scaffold a strategy", "run a backtest on kdraigo", "analyze this session", "iterate on my bot", or names a kdraigo session ID.
+A strategy is a Go program built on dev_sdk. Running it (`go run .` in its folder) creates a backtest session on the engine and drives it with the strategy's own code. **No MCP tool runs strategy code.** The program logs the session id once the session exists:
+
+```text
+Backtest Engine: Successfully initialized Session ID: 3f2a9c1e-…
+```
+
+Capture that id; every result tool takes it. The window, instruments, wallets and timeframe come from the strategy's own config (see `get_sdk_docs`). Keys come from `KDRAIGO_KEY_ID` / `KDRAIGO_PRIVATE_KEY`; never write them into code.
 
 ## The loop
 
-1. **Recall the SDK surface.** Call `get_sdk_docs` once at the start of a fresh task. If the user is asking about one area (clock, history fetch, order placement), pass `section` to scope it. For technical indicators, follow the **`kdraigo-indicators`** skill to choose the right one by intent, pull signatures with `get_sdk_docs section=indicators`, and read the deep per-indicator reference with `get_indicator_docs` (`name=RSI` to scope). Don't guess indicator names, signatures, or `pointType`; read them from there first.
-2. **Scaffold when starting from scratch.** Call `scaffold_strategy` with `template=basic` for new bots, `with-indicators` when the user mentions RSI/MA/etc., and `with-risk-manager` when they mention position sizing, stop-loss, or take-profit. Always pass an absolute `dir` and a kebab-case `name`. Show the user the generated `main.go` before editing.
-3. **Create the session.** Call `create_backtest_session` with the exchange, pair, timeframe, date range, asset, and initial balance. Confirm date range with the user if they were vague — drift here wastes a real run.
-4. **Run.** Call `run_backtest_stream` with the returned `session_id`. This blocks until the engine reports done; for long runs (multi-month 1m) warn the user before invoking.
-5. **Pull results.** Call `get_session_detail` for orders + summary metrics, then `get_analytics_series` with `type=equity` for the equity curve. Use `timeframe=1h` for multi-week runs, `1m` for short runs.
-6. **Reason.** Before proposing changes, summarise: total trades, win rate, max drawdown, profit factor, and where the curve went sideways. If results are weak, name the *mechanism* (e.g. "entries are correct but exits are too eager — 70% of winning trades give back >40% of peak unrealized profit") rather than offering generic advice.
-7. **Iterate.** Propose specific code edits to the scaffolded file. Re-run by jumping back to step 3 with a new `session_id`. Use `update_session_metadata` after each meaningful run to label it (`name`, `notes`, `tags=[v1, v2, ...]`).
+1. **Read the SDK first.** `get_sdk_docs` once per task (`section=` to narrow it). For indicators follow the `kdraigo-indicators` skill and `get_indicator_docs`. Don't guess names, signatures or `pointType`.
+2. **Scaffold or open the strategy.** `scaffold_strategy` (`basic`, `with-indicators`, `with-risk-manager`) with an absolute `dir`. Otherwise work in the user's repo.
+3. **Write the hypothesis down before running.** What changes, why it should work (the mechanism), and the rule that decides it, e.g. "return/DD ≥ baseline × 1.1 on the test window and at least 6/10 instruments positive". Pick the train, test and hold-out windows now. The hold-out stays untouched until the rule is frozen.
+4. **Run.** `go run .` from the strategy folder; for anything longer than a few minutes, run it in the background and capture the log. Take the session id from the log line above. `get_session_detail` or `list_sessions` show status and progress while it runs.
+5. **Report.** `get_session_report` first, every time. **Read its warnings before its numbers.** An unfinished run, missing candles, positions open at the end or a result carried by one trade change what the numbers mean.
+6. **Drill down** only as far as the question needs:
+   - `get_session_orders`: filter by `role` (`stop_loss`, `take_profit`, …), `status`, `pair`, time. Add `with_reason` (≤50 rows) to see why the strategy acted. Use `save_to=/abs/path/orders.csv` to get every order for your own analysis.
+   - `get_session_positions` / `get_session_funding`: futures only; paged.
+   - `get_analytics_series`: `type=equity` or `drawdown`, `timeframe=1h` or `1d`, optionally `exchange` + `pair` for one instrument.
+7. **Record.** `update_session_metadata` on every run you keep: a `name` that says the variant, `notes` with the hypothesis and the verdict, `tags` such as `exp:<slug>`, `baseline`, `variant:<x>`.
+8. **Iterate:** one hypothesis, one change, one run. Compare against the same baseline, on the same window and the same instruments.
 
-## Rules
+## Judging a result
 
-- Never hardcode `KeyID` or `PrivateKey` in scaffolded code — the templates already read them from env.
-- After a backtest, always assign a name + notes via `update_session_metadata` before moving on. Future-you will need to find this run again.
-- When the user asks "why did this trade happen", check the order's `Reason` and `Logs` fields in `get_session_detail` before guessing. The strategy author put them there for a reason.
-- Don't propose multiple unrelated changes at once. Single hypothesis per iteration → single run → measure.
-- `get_candles` is for ad-hoc inspection of OHLCV data. It does not run a strategy. Don't use it to "simulate" anything.
+- **Return over drawdown, not return.** A change that also cuts risk (a tighter stop, a smaller size, an earlier exit) must beat the baseline at the same drawdown. Otherwise it is just a smaller bet.
+- **Enough trades.** Below about 30 closed trades, win rate and profit factor are noise. Per instrument it needs even more.
+- **Breadth.** Count the instruments with positive net (x of N). A result made by one coin is about that coin.
+- **Time.** Look at the months table for the worst month, the number of losing months and the longest losing run. One great month can make a year.
+- **Fat tails.** If the best trade is a large share of net P&L, recompute without the top 5 trades (from the orders CSV) before believing it.
+- **R multiples.** For per-trade quality, compute R = net / initial risk from the orders CSV. Initial risk is |entry − stop| × size, and the stop is the entry order's `reason.stop` or the first opposite-side `STOP_LOSS` order's `stop_price`. Report the average R with its standard error, not just the mean.
+- **Open at end.** Positions still open at the end are valued at their last fill. If they are a big share of the result, the result is unfinished.
+
+## Pitfalls
+
+- **Look-ahead.** An indicator on a bar that is still forming uses the future. Decide on closed bars only. The same applies to plot values: a value belongs to its bar's close.
+- **Incomplete run.** Check that the run reached the end of its window (status, progress, last candle) before comparing. A run that stopped early looks like a calm strategy.
+- **End-of-run settlement.** Trades closed by the end of the window are not exits the strategy chose.
+- **In-sample selection.** Choosing coins, parameters or sessions by how they did on the same window you report is fitting. Choose on train, report on test.
+- **Multiple comparisons.** Every variant you try is a draw. After ten tries, the best of ten beating the baseline is expected by chance. Keep count and say it.
+- **Costs left out.** Fees and funding are in net P&L, but a hand-computed R from prices alone leaves them out. Say which you used.
+- **Small wallets.** A tiny balance skips trades that round to zero size, or that fall below the exchange minimum. Check the order count against what the logic should have sent.
+- **One regime.** A window that is all trend or all chop tells you about that regime. Test across at least two.
+- **The hold-out is used once.** After you look at it, it is no longer a hold-out.
+
+## Conventions that make the tools more useful
+
+- Put the decision context in each order's `Reason` (a map, ≤4 KB) and short `Logs` lines (≤16 KB). They come back with `with_reason` and in the CSV.
+- **Entry orders carry `reason.stop`:** the initial stop price, as a number. Risk and R are computed from it, even when the protective stop is placed a bar later.
+- Protective stops are `STOP_LOSS` orders with both `StopPrice` and `Price` set; the backtest engine rejects a stop with only a trigger.
 
 ## Output style
 
-Be concrete. After a run, lead with the two or three numbers that matter (final equity, max drawdown, trades) and the one observation that drives the next change. Don't restate the whole tool output — it's already in the conversation.
+Lead with the two or three numbers that decide the question (return/DD against the baseline, trades, instruments positive), then any warning that qualifies them, then the one observation that drives the next change. Don't restate tool output that is already in the conversation.
