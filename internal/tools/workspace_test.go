@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -172,4 +173,122 @@ func TestEnvArg(t *testing.T) {
 	req.Params.Arguments = map[string]any{"env": "A=1"}
 	_, err = envArg(req)
 	assert.Error(t, err)
+}
+
+// A file read shows its content exactly, then its version for the next write.
+func TestWorkspaceReadFile_ShowsTheVersion(t *testing.T) {
+	s := backend(t, map[string]http.HandlerFunc{
+		wsRoute("/workspaces/" + wsID + "/files/main.go"): jsonReply(map[string]any{"path": "main.go", "content": "package main\n",
+			"version": 6, "updated_by": "lab", "updated_at": time.Date(2026, 10, 26, 14, 2, 0, 0, time.UTC)}),
+	})
+	tool := s.GetTool("workspace_read_file")
+	req := mcp.CallToolRequest{}
+	req.Params.Arguments = map[string]any{"workspace_id": wsID, "path": "main.go"}
+	res, err := tool.Handler(context.Background(), req)
+	require.NoError(t, err)
+	require.Len(t, res.Content, 2)
+	assert.Equal(t, "package main\n", res.Content[0].(mcp.TextContent).Text, "the content is untouched")
+	note := res.Content[1].(mcp.TextContent).Text
+	assert.Contains(t, note, "version 6, written by the Lab")
+	assert.Contains(t, note, "base_version=6")
+}
+
+func TestWorkspaceWriteFile_Versions(t *testing.T) {
+	var got map[string]any
+	reply := func(status int, body map[string]any) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			got = nil
+			_ = json.NewDecoder(r.Body).Decode(&got)
+			w.WriteHeader(status)
+			_ = json.NewEncoder(w).Encode(body)
+		}
+	}
+	route := wsRoute("/workspaces/" + wsID + "/files/main.go")
+	ok := reply(http.StatusOK, map[string]any{"path": "main.go", "size": 13, "version": 7, "updated_by": "api"})
+	handler := ok
+	s := backend(t, map[string]http.HandlerFunc{route: func(w http.ResponseWriter, r *http.Request) { handler(w, r) }})
+	args := func(extra map[string]any) map[string]any {
+		a := map[string]any{"workspace_id": wsID, "path": "main.go", "content": "package main\n"}
+		for k, v := range extra {
+			a[k] = v
+		}
+		return a
+	}
+
+	out, isErr := call(t, s, "workspace_write_file", args(map[string]any{"base_version": 6}))
+	require.False(t, isErr, out)
+	assert.Equal(t, float64(6), got["base_version"])
+	assert.Equal(t, "Wrote main.go (13 bytes): now version 7.", out)
+
+	_, isErr = call(t, s, "workspace_write_file", args(map[string]any{"base_version": 0}))
+	require.False(t, isErr)
+	assert.Equal(t, float64(0), got["base_version"], "0 is sent: create only")
+	_, isErr = call(t, s, "workspace_write_file", args(nil))
+	require.False(t, isErr)
+	assert.NotContains(t, got, "base_version", "absent: replace whatever is there")
+
+	handler = reply(http.StatusConflict, map[string]any{"error": "conflict: …", "current_version": 8, "updated_by": "lab"})
+	out, isErr = call(t, s, "workspace_write_file", args(map[string]any{"base_version": 7}))
+	assert.True(t, isErr)
+	assert.Contains(t, out, "main.go changed since you read it (now version 8, written by the Lab); nothing was changed")
+	assert.Contains(t, out, "retry with base_version=8")
+
+	handler = reply(http.StatusConflict, map[string]any{"error": "conflict: …", "current_version": 0})
+	out, _ = call(t, s, "workspace_write_file", args(map[string]any{"base_version": 7}))
+	assert.Contains(t, out, "was deleted since you read it")
+
+	for _, bad := range []any{1.5, -1, "7"} {
+		out, isErr = call(t, s, "workspace_write_file", args(map[string]any{"base_version": bad}))
+		assert.True(t, isErr, "%v", bad)
+		assert.Contains(t, out, "base_version must be a whole number")
+	}
+}
+
+func TestWorkspaceDeleteFile_Version(t *testing.T) {
+	var query string
+	s := backend(t, map[string]http.HandlerFunc{
+		wsRoute("/workspaces/" + wsID + "/files/risk.go"): func(w http.ResponseWriter, r *http.Request) {
+			require.Equal(t, http.MethodDelete, r.Method)
+			query = r.URL.RawQuery
+			w.WriteHeader(http.StatusNoContent)
+		},
+	})
+	out, isErr := call(t, s, "workspace_delete_file", map[string]any{"workspace_id": wsID, "path": "risk.go", "version": 3})
+	require.False(t, isErr, out)
+	assert.Equal(t, "version=3", query)
+	_, isErr = call(t, s, "workspace_delete_file", map[string]any{"workspace_id": wsID, "path": "risk.go"})
+	require.False(t, isErr)
+	assert.Empty(t, query)
+	_, isErr = call(t, s, "workspace_delete_file", map[string]any{"workspace_id": wsID, "path": "risk.go", "version": 0})
+	assert.True(t, isErr, "a delete names a version that exists")
+}
+
+func TestWorkspaceDeleteFile_Conflict(t *testing.T) {
+	s := backend(t, map[string]http.HandlerFunc{
+		wsRoute("/workspaces/" + wsID + "/files/risk.go"): func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusConflict)
+			_, _ = io.WriteString(w, `{"error":"conflict","current_version":4,"updated_by":"lab"}`)
+		},
+	})
+	out, isErr := call(t, s, "workspace_delete_file", map[string]any{"workspace_id": wsID, "path": "risk.go", "version": 3})
+	assert.True(t, isErr)
+	assert.Contains(t, out, "now version 4, written by the Lab")
+	assert.Contains(t, out, "retry with version=4", "the delete tool's own argument")
+}
+
+func TestWorkspaceFiles_ShowVersionAndWriter(t *testing.T) {
+	s := backend(t, map[string]http.HandlerFunc{
+		wsRoute("/workspaces/" + wsID): jsonReply(map[string]any{
+			"workspace": map[string]any{"id": wsID, "name": "rsi", "sdk_version": "v1.5.0"},
+			"files": []any{
+				map[string]any{"path": "main.go", "size": 2600, "version": 4, "updated_by": "lab"},
+				map[string]any{"path": "risk.go", "size": 300, "version": 1, "updated_by": "api"},
+			},
+		}),
+	})
+	out, isErr := call(t, s, "workspace_files", map[string]any{"workspace_id": wsID})
+	require.False(t, isErr, out)
+	assert.Contains(t, out, "version")
+	assert.Contains(t, out, "the Lab")
+	assert.Contains(t, out, "API")
 }

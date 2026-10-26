@@ -614,6 +614,12 @@ The cloud workspace builds and runs a strategy on the platform, so nothing is ne
 
 **Shape.** A workspace is flat `.go` files in package `main`: no folders, no `go.mod`, no `go.sum`. The platform owns the module and pins dev_sdk to the workspace's version. A workspace starts from a template (`basic`, `with-indicators`, `with-risk-manager`). Limits: 50 files, 256 KB each, 1 MB in all.
 
+**Editing alongside the user.** The user can open the same workspace in the website's Lab, edit its files there and watch your writes, builds and runs as they happen.
+- **Versions:** each file's version goes up with every write. `workspace_read_file` and `workspace_files` show it, and who wrote it (the Lab or API).
+- **Pass the version you read** as `base_version` to `workspace_write_file` (0 for a new file), and as `version` to `workspace_delete_file`.
+- **If the file changed since, nothing is written** and the tool says who changed it. Read it again, keep that change, and write again with the new version.
+- **Without `base_version`** a write replaces whatever the file holds, the user's edits included.
+
 **Imports.**
 - **Allowed:** `github.com/kdraigo/dev_sdk/...` and this part of the standard library:
   - `bufio` `bytes` `cmp` `context` `embed` `errors` `flag` `fmt` `html` `io` `io/fs` `iter` `log` `log/slog` `maps`;

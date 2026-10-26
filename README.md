@@ -99,10 +99,10 @@ Results come back as a few header lines and tab-separated tables, with no JSON, 
 | `get_candles` | OHLCV from data_provider (public endpoint, no signing). |
 | `workspace_create` | Starts a cloud workspace from a template (`basic`, `with-indicators`, `with-risk-manager`) on a dev_sdk version. |
 | `workspace_list` | The caller's workspaces. |
-| `workspace_files` | A workspace's files with sizes. |
-| `workspace_read_file` | A file's full content. |
-| `workspace_write_file` | Creates or replaces a file (flat `.go` files; the platform owns `go.mod`). |
-| `workspace_delete_file` | Deletes a file. |
+| `workspace_files` | A workspace's files with sizes, versions and who wrote each (the Lab or API). |
+| `workspace_read_file` | A file's full content, then its version. |
+| `workspace_write_file` | Creates or replaces a file (flat `.go` files; the platform owns `go.mod`). With `base_version`, a file the user changed in the Lab since is refused, not overwritten. |
+| `workspace_delete_file` | Deletes a file; with `version`, only that version. |
 | `workspace_build` | Compiles on a sandbox machine; returns import-check or compiler errors as `file:line: message`. |
 | `workspace_run` | Builds and runs on the sandbox machine with a key minted for the run; waits up to `wait` s and names the backtest sessions it made. Takes your own `env`. |
 | `workspace_run_status` | A build's or run's status, sessions and last lines of output; `wait` follows one still going. |

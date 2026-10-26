@@ -70,6 +70,7 @@ Capture that id; every result tool takes it. The window, instruments, wallets an
 - **One regime.** A window that is all trend or all chop tells you about that regime. Test across at least two.
 - **The hold-out is used once.** After you look at it, it is no longer a hold-out.
 - **Cloud: a write replaces the whole file.** `workspace_write_file` takes the file's full new content, so read it first and send all of it.
+- **Cloud: pass the version you read.** The user may be editing the same file in the website's Lab. With `base_version` (the version `workspace_read_file` showed; 0 for a new file), a write over their change is refused instead of erasing it. When that happens, read the file again, keep their change, and write with the new version.
 - **Cloud: keys and endpoint come from the run.** Keep reading `KDRAIGO_KEY_ID`, `KDRAIGO_PRIVATE_KEY` and `KDRAIGO_BACKTESTER_URL` from the environment as the templates do. The run supplies its own key; a hard-coded one is refused.
 
 ## Conventions that make the tools more useful

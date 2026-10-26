@@ -2,7 +2,9 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"sort"
@@ -47,9 +49,14 @@ type (
 		CreatedAt  time.Time `json:"created_at"`
 		UpdatedAt  time.Time `json:"updated_at"`
 	}
+	// workspaceFile: Version goes up with each write; UpdatedBy is api (an
+	// API key: this server) or lab (the website's editor, where the user may
+	// be editing the same files).
 	workspaceFile struct {
 		Path      string    `json:"path"`
 		Size      int       `json:"size"`
+		Version   int64     `json:"version"`
+		UpdatedBy string    `json:"updated_by"`
 		UpdatedAt time.Time `json:"updated_at"`
 	}
 	workspaceDetail struct {
@@ -192,14 +199,32 @@ func renderFiles(doc *render.Doc, files []workspaceFile) {
 	}
 	rows := make([][]string, 0, len(files))
 	for _, f := range files {
-		rows = append(rows, []string{f.Path, render.Int(f.Size), render.Time(f.UpdatedAt)})
+		version := render.Dash
+		if f.Version > 0 {
+			version = strconv.FormatInt(f.Version, 10)
+		}
+		rows = append(rows, []string{f.Path, render.Int(f.Size), version, writer(f.UpdatedBy), render.Time(f.UpdatedAt)})
 	}
-	doc.Table("", []string{"path", "bytes", "updated"}, rows, nil)
+	doc.Table("", []string{"path", "bytes", "version", "by", "updated"}, rows, nil)
+}
+
+// writer names who wrote a file version: the user in the Lab, or an API key
+// (this server, for the user's AI).
+func writer(by string) string {
+	switch by {
+	case "lab":
+		return "the Lab"
+	case "api":
+		return "API"
+	default:
+		return render.Dash
+	}
 }
 
 func addWorkspaceReadFile(s *server.MCPServer, d Deps) {
 	tool := mcp.NewTool("workspace_read_file",
-		mcp.WithDescription("A workspace file's full content, exactly as stored."),
+		mcp.WithDescription("A workspace file's full content, exactly as stored, then a note with its version: pass that as base_version to workspace_write_file. "+
+			"The user may be editing the same files in the website's Lab."),
 		mcp.WithString("workspace_id", mcp.Required(), mcp.Description("Workspace UUID")),
 		mcp.WithString("path", mcp.Required(), mcp.Description("File name, e.g. main.go")),
 		readOnly(),
@@ -215,21 +240,30 @@ func addWorkspaceReadFile(s *server.MCPServer, d Deps) {
 		}
 		var f struct {
 			Content string `json:"content"`
+			workspaceFile
 		}
 		if err := d.getJSON(ctx, "workspace_read_file", client.Workspace, wsPath(id)+"/files/"+url.PathEscape(path), nil, &f); err != nil {
 			return toolErr(err), nil
 		}
-		return toolText(f.Content), nil
+		if f.Version == 0 {
+			return toolText(f.Content), nil
+		}
+		// The content stays a block of its own, exactly as stored.
+		note := fmt.Sprintf("(%s: version %d, written by %s at %s. Change it with workspace_write_file base_version=%d.)",
+			path, f.Version, writer(f.UpdatedBy), render.Time(f.UpdatedAt), f.Version)
+		return &mcp.CallToolResult{Content: []mcp.Content{mcp.NewTextContent(f.Content), mcp.NewTextContent(note)}}, nil
 	})
 }
 
 func addWorkspaceWriteFile(s *server.MCPServer, d Deps) {
 	tool := mcp.NewTool("workspace_write_file",
 		mcp.WithDescription("Create or replace a workspace file with the whole new content. Files are flat .go files in package main (no folders, no go.mod: the platform owns it); at most 50 files, 256 KB each, 1 MB in all. "+
-			"Imports are checked when the workspace is built: the standard library minus os/exec, net, unsafe, syscall and cgo, plus github.com/kdraigo/dev_sdk."),
+			"Imports are checked when the workspace is built: the standard library minus os/exec, net, unsafe, syscall and cgo, plus github.com/kdraigo/dev_sdk. "+
+			"Pass base_version, the version workspace_read_file showed (0 for a new file): the user may be editing in the website's Lab, and a file that changed since you read it is then refused instead of overwritten."),
 		mcp.WithString("workspace_id", mcp.Required(), mcp.Description("Workspace UUID")),
 		mcp.WithString("path", mcp.Required(), mcp.Description("File name, e.g. main.go or risk.go")),
 		mcp.WithString("content", mcp.Required(), mcp.Description("The file's full new content")),
+		mcp.WithNumber("base_version", mcp.Description("The version you read (workspace_read_file or workspace_files); 0 creates a new file only. Without it the file is replaced whatever it holds.")),
 		destructive(true),
 	)
 	add(s, tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -245,18 +279,35 @@ func addWorkspaceWriteFile(s *server.MCPServer, d Deps) {
 		if err != nil {
 			return toolErr(err), nil
 		}
-		if err := d.sendJSON(ctx, "workspace_write_file", http.MethodPut, client.Workspace, wsPath(id)+"/files/"+url.PathEscape(path), map[string]string{"content": content}, nil); err != nil {
+		body := map[string]any{"content": content}
+		base, ok, err := versionArg(req, "base_version", 0)
+		if err != nil {
 			return toolErr(err), nil
 		}
-		return toolText(fmt.Sprintf("Wrote %s (%d bytes).", path, len(content))), nil
+		if ok {
+			body["base_version"] = base
+		}
+		resp, status, err := d.HTTP.Do(ctx, true, client.HeaderStyleStandard, http.MethodPut, client.Workspace, wsPath(id)+"/files/"+url.PathEscape(path), nil, body)
+		if err != nil {
+			return toolErr(fmt.Errorf("workspace_write_file: %w", err)), nil
+		}
+		if status < 200 || status >= 300 {
+			return toolErr(fileErr("workspace_write_file", "base_version", path, status, resp)), nil
+		}
+		var f workspaceFile
+		if json.Unmarshal(resp, &f) != nil || f.Version == 0 {
+			return toolText(fmt.Sprintf("Wrote %s (%d bytes).", path, len(content))), nil
+		}
+		return toolText(fmt.Sprintf("Wrote %s (%d bytes): now version %d.", path, len(content), f.Version)), nil
 	})
 }
 
 func addWorkspaceDeleteFile(s *server.MCPServer, d Deps) {
 	tool := mcp.NewTool("workspace_delete_file",
-		mcp.WithDescription("Delete a file from a workspace."),
+		mcp.WithDescription("Delete a file from a workspace. Pass version, the one you read, so a file the user changed in the Lab since is not deleted."),
 		mcp.WithString("workspace_id", mcp.Required(), mcp.Description("Workspace UUID")),
 		mcp.WithString("path", mcp.Required(), mcp.Description("File name")),
+		mcp.WithNumber("version", mcp.Description("Delete only if the file is still at this version")),
 		destructive(true),
 	)
 	add(s, tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -268,11 +319,69 @@ func addWorkspaceDeleteFile(s *server.MCPServer, d Deps) {
 		if err != nil {
 			return toolErr(err), nil
 		}
-		if err := d.sendJSON(ctx, "workspace_delete_file", http.MethodDelete, client.Workspace, wsPath(id)+"/files/"+url.PathEscape(path), nil, nil); err != nil {
+		var q url.Values
+		version, ok, err := versionArg(req, "version", 1)
+		if err != nil {
 			return toolErr(err), nil
+		}
+		if ok {
+			q = url.Values{"version": {strconv.FormatInt(version, 10)}}
+		}
+		resp, status, err := d.HTTP.Do(ctx, true, client.HeaderStyleStandard, http.MethodDelete, client.Workspace, wsPath(id)+"/files/"+url.PathEscape(path), q, nil)
+		if err != nil {
+			return toolErr(fmt.Errorf("workspace_delete_file: %w", err)), nil
+		}
+		if status < 200 || status >= 300 {
+			return toolErr(fileErr("workspace_delete_file", "version", path, status, resp)), nil
 		}
 		return toolText(fmt.Sprintf("Deleted %s.", path)), nil
 	})
+}
+
+// versionArg reads an optional file version argument, a whole number no
+// smaller than least; ok says whether it was given.
+func versionArg(req mcp.CallToolRequest, name string, least int64) (int64, bool, error) {
+	v, ok := req.GetArguments()[name]
+	if !ok || v == nil {
+		return 0, false, nil
+	}
+	var f float64
+	isNum := true
+	switch n := v.(type) {
+	case float64:
+		f = n
+	case int:
+		f = float64(n)
+	case int64:
+		f = float64(n)
+	default:
+		isNum = false
+	}
+	if !isNum || f != math.Trunc(f) || f < float64(least) {
+		return 0, false, fmt.Errorf("%s must be a whole number of at least %d", name, least)
+	}
+	return int64(f), true, nil
+}
+
+// fileErr is a refused file write or delete. A 409 means the file moved on
+// since it was read: the AI is told what to do, with arg (the tool's version
+// argument), rather than given the JSON.
+func fileErr(name, arg, path string, status int, body []byte) error {
+	if status != http.StatusConflict {
+		return httpErr(name, status, body)
+	}
+	var c struct {
+		CurrentVersion int64  `json:"current_version"`
+		UpdatedBy      string `json:"updated_by"`
+	}
+	if json.Unmarshal(body, &c) != nil {
+		return httpErr(name, status, body)
+	}
+	if c.CurrentVersion == 0 {
+		return fmt.Errorf("%s: %s was deleted since you read it; nothing was changed. To create it again, write it with base_version=0", name, path)
+	}
+	return fmt.Errorf("%s: %s changed since you read it (now version %d, written by %s); nothing was changed. "+
+		"Read it again with workspace_read_file, keep that change, and retry with %s=%d", name, path, c.CurrentVersion, writer(c.UpdatedBy), arg, c.CurrentVersion)
 }
 
 func addWorkspaceBuild(s *server.MCPServer, d Deps) {
