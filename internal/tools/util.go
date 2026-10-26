@@ -13,7 +13,33 @@ import (
 )
 
 func httpErr(name string, status int, body []byte) error {
+	// A service's own message reads better than its JSON.
+	var e struct {
+		Error string `json:"error"`
+	}
+	if json.Unmarshal(body, &e) == nil && e.Error != "" {
+		return fmt.Errorf("%s: HTTP %d: %s", name, status, e.Error)
+	}
 	return fmt.Errorf("%s: HTTP %d: %s", name, status, string(body))
+}
+
+// sendJSON is a signed request with a JSON body (nil for none), decoded into
+// out (nil to ignore the answer).
+func (d Deps) sendJSON(ctx context.Context, name, method string, svc client.ServicePrefix, path string, body, out any) error {
+	resp, status, err := d.HTTP.Do(ctx, true, client.HeaderStyleStandard, method, svc, path, nil, body)
+	if err != nil {
+		return fmt.Errorf("%s: %w", name, err)
+	}
+	if status < 200 || status >= 300 {
+		return httpErr(name, status, resp)
+	}
+	if out == nil || len(resp) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(resp, out); err != nil {
+		return fmt.Errorf("%s: decode response: %w", name, err)
+	}
+	return nil
 }
 
 // getJSON is a signed GET through the gateway, decoded into out. name is the

@@ -27,6 +27,9 @@ const (
 	FrontendAPI ServicePrefix = "/frontend-api"
 	Analytics   ServicePrefix = "/analytics"
 	Data        ServicePrefix = "/data"
+	// Workspace is workspace_service: the cloud workspace that builds and runs
+	// a strategy on a sandbox machine.
+	Workspace ServicePrefix = "/workspace"
 )
 
 // HeaderStyle selects which header names carry the Ed25519 signature.

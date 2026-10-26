@@ -21,6 +21,7 @@ func Register(s *server.MCPServer, d Deps) {
 	RegisterSessions(s, d)
 	RegisterAnalytics(s, d)
 	RegisterCandles(s, d)
+	RegisterWorkspace(s, d)
 	if os.Getenv(ReplayEnv) == "1" {
 		RegisterBacktest(s, d)
 	}

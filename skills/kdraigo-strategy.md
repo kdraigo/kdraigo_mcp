@@ -1,6 +1,6 @@
 ---
 name: kdraigo-strategy
-description: Develop, backtest and judge Go trading strategies on the kdraigo platform through the kdraigo MCP server. Use when the user wants to scaffold a strategy, run or analyse a backtest, compare runs, decide whether a change helped, or names a kdraigo session id.
+description: Develop, backtest and judge Go trading strategies on the kdraigo platform through the kdraigo MCP server, locally or in the cloud workspace. Use when the user wants to write or scaffold a strategy, run or analyse a backtest, compare runs, decide whether a change helped, or names a kdraigo session id.
 ---
 
 # kdraigo-strategy
@@ -9,7 +9,14 @@ You develop strategies on the kdraigo platform. Platform data comes through the 
 
 ## How a strategy runs
 
-A strategy is a Go program built on dev_sdk. Running it (`go run .` in its folder) creates a backtest session on the engine and drives it with the strategy's own code. **No MCP tool runs strategy code.** The program logs the session id once the session exists:
+A strategy is a Go program built on dev_sdk. Running it creates a backtest session on the engine and drives it with the strategy's own code. It runs one of two ways:
+
+- **Cloud workspace** (no local Go, checkout or keys): `workspace_create` from a template, `workspace_write_file`, then `workspace_run`.
+  - The platform builds and runs it on a sandbox machine of the user's own.
+  - The result lists the backtest sessions the run made.
+  - A workspace is flat `.go` files with a fixed set of allowed imports. Read `get_sdk_docs section="cloud workspace"` before writing one.
+  - Use it when the user has no local setup or asks for it.
+- **Locally:** `go run .` in the strategy's folder, in the user's own repo. The program logs the session id once the session exists:
 
 ```text
 Backtest Engine: Successfully initialized Session ID: 3f2a9c1e-…
@@ -20,9 +27,16 @@ Capture that id; every result tool takes it. The window, instruments, wallets an
 ## The loop
 
 1. **Read the SDK first.** `get_sdk_docs` once per task (`section=` to narrow it). For indicators follow the `kdraigo-indicators` skill and `get_indicator_docs`. Don't guess names, signatures or `pointType`.
-2. **Scaffold or open the strategy.** `scaffold_strategy` (`basic`, `with-indicators`, `with-risk-manager`) with an absolute `dir`. Otherwise work in the user's repo.
+2. **Scaffold or open the strategy.**
+   - **Cloud:** `workspace_create` (`basic`, `with-indicators`, `with-risk-manager`), or `workspace_list` to reopen one, then `workspace_read_file`.
+   - **Locally:** `scaffold_strategy` with an absolute `dir`, or work in the user's repo.
 3. **Write the hypothesis down before running.** What changes, why it should work (the mechanism), and the rule that decides it, e.g. "return/DD ≥ baseline × 1.1 on the test window and at least 6/10 instruments positive". Pick the train, test and hold-out windows now. The hold-out stays untouched until the rule is frozen.
-4. **Run.** `go run .` from the strategy folder; for anything longer than a few minutes, run it in the background and capture the log. Take the session id from the log line above. `get_session_detail` or `list_sessions` show status and progress while it runs.
+4. **Run.**
+   - **Cloud:** `workspace_run` waits up to 150 s. For a longer run, follow it with `workspace_run_status run_id=… wait=120`. Its result names the session ids.
+     - A refused or failed build lists `file:line` problems: fix and run again.
+     - `workspace_build` alone is the quick compile check after an edit.
+   - **Locally:** `go run .` from the strategy folder. Run anything longer than a few minutes in the background and capture the log. Take the session id from the log line above.
+   - Either way, `get_session_detail` or `list_sessions` show status and progress while it runs.
 5. **Report.** `get_session_report` first, every time. **Read its warnings before its numbers.** An unfinished run, missing candles, positions open at the end or a result carried by one trade change what the numbers mean.
 6. **Drill down** only as far as the question needs:
    - `get_trades`: one row per trade, with entry and exit, net, the initial stop and R. Use `sort=net` or `sort=net_r` to see the trades that made or broke the result, and filter by `side`, `exit_kind` or instrument. `save_to=/abs/path/trades.csv` gets every trade for your own analysis.
@@ -55,6 +69,8 @@ Capture that id; every result tool takes it. The window, instruments, wallets an
 - **Small wallets.** A tiny balance skips trades that round to zero size, or that fall below the exchange minimum. Check the order count against what the logic should have sent.
 - **One regime.** A window that is all trend or all chop tells you about that regime. Test across at least two.
 - **The hold-out is used once.** After you look at it, it is no longer a hold-out.
+- **Cloud: a write replaces the whole file.** `workspace_write_file` takes the file's full new content, so read it first and send all of it.
+- **Cloud: keys and endpoint come from the run.** Keep reading `KDRAIGO_KEY_ID`, `KDRAIGO_PRIVATE_KEY` and `KDRAIGO_BACKTESTER_URL` from the environment as the templates do. The run supplies its own key; a hard-coded one is refused.
 
 ## Conventions that make the tools more useful
 

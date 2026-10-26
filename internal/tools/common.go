@@ -73,6 +73,15 @@ func additive(idempotent bool) mcp.ToolOption {
 	}
 }
 
+// destructive is a tool that overwrites, stops or removes something.
+func destructive(idempotent bool) mcp.ToolOption {
+	return func(t *mcp.Tool) {
+		t.Annotations.ReadOnlyHint = mcp.ToBoolPtr(false)
+		t.Annotations.DestructiveHint = mcp.ToBoolPtr(true)
+		t.Annotations.IdempotentHint = mcp.ToBoolPtr(idempotent)
+	}
+}
+
 // local is a tool that never leaves this machine.
 func local() mcp.ToolOption {
 	return func(t *mcp.Tool) { t.Annotations.OpenWorldHint = mcp.ToBoolPtr(false) }

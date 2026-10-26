@@ -608,6 +608,49 @@ s.SetOnCandleFor(types.Timeframe1h, func(ctx *types.Context, c *types.Candle) {
 
 Limits: 32 plots and 8 panels per session, 8 levels per plot, marker text 32 characters. Plot storage per session is 8 MB basic / 64 MB verified / 256 MB admin (about 16 bytes a value: 500,000 values on basic). Past it a **backtest** keeps running, one response carries a `warning`, and later values are not stored; a **live** session keeps its newest values and drops its oldest (the warning is logged by the SDK once).
 
+## cloud workspace
+
+The cloud workspace builds and runs a strategy on the platform, so nothing is needed locally: no Go, no checkout, no keys. The `workspace_*` tools drive it. The same program runs as it would with `go run .`; only where it runs changes.
+
+**Shape.** A workspace is flat `.go` files in package `main`: no folders, no `go.mod`, no `go.sum`. The platform owns the module and pins dev_sdk to the workspace's version. A workspace starts from a template (`basic`, `with-indicators`, `with-risk-manager`). Limits: 50 files, 256 KB each, 1 MB in all.
+
+**Imports.**
+- **Allowed:** `github.com/kdraigo/dev_sdk/...` and this part of the standard library:
+  - `bufio` `bytes` `cmp` `context` `embed` `errors` `flag` `fmt` `html` `io` `io/fs` `iter` `log` `log/slog` `maps`;
+  - `os` `path` `path/filepath` `reflect` `regexp` `runtime` `runtime/debug` `slices` `sort` `strconv` `strings`;
+  - `sync` `sync/atomic` `testing` `time` `unique` `unicode` `unicode/utf8` `unicode/utf16`;
+  - `math` `math/big` `math/bits` `math/cmplx` `math/rand` `math/rand/v2`;
+  - `container/heap|list|ring`;
+  - `encoding` `encoding/base64|binary|csv|hex|json`;
+  - `hash` `hash/crc32|fnv|maphash`;
+  - `crypto/hmac|md5|rand|sha1|sha256|sha512`;
+  - `text/scanner|tabwriter|template`.
+- **Refused:** everything else, among them `os/exec`, `net/...`, `unsafe`, `syscall`, `plugin`, cgo and any other module, plus `//go:linkname` and other `//go:` directives except `build`, `embed`, `generate` and `noinline`.
+- **When it's checked:** at build time, and a refused build lists every problem as `file:line: message`.
+
+**How a run goes.**
+1. `workspace_build` (or the build inside `workspace_run`) compiles offline on a machine of your own. Your first build after a while starts that machine (about 40 s), and later builds take seconds.
+2. `workspace_run` then runs the binary with:
+   - `KDRAIGO_KEY_ID` and `KDRAIGO_PRIVATE_KEY`: a key minted for this run alone, which can only open and stream backtest sessions and is revoked when the run ends;
+   - `KDRAIGO_BACKTESTER_URL`: the backtester to use.
+   The templates read all three; keep them that way rather than hard-coding an endpoint.
+3. The run's backtest sessions are listed by its key. `workspace_run` and `workspace_run_status` show them; pass one to `get_session_report`.
+
+**What the program can reach.** It runs as an unprivileged user under gVisor, on a read-only filesystem with a small `/tmp` that cannot execute. Its only network access is the platform API through dev_sdk: no internet, no DNS, no exchanges. **Backtests only**: live trading does not run here.
+
+**Your own settings** go in `workspace_run`'s `env`: upper-case names, at most 32 of them, values up to 4 KB with no line breaks, and never a `KDRAIGO_` name. A run records the names it was given, never the values.
+
+**Limits per account.** A run's wall-clock time is the tier's session run time (`## limits`), and its output is kept up to 1 MB.
+
+| | basic | verified | admin |
+|---|---|---|---|
+| Cloud workspace | no (link Telegram) | yes | yes |
+| Runs at once | — | 1 | 4 |
+| Machine time per day (UTC) | — | 4 h | 24 h |
+| Workspaces | — | 10 | 50 |
+
+The workspace is in beta, open to admin accounts first: others get 403 with that message.
+
 ## limits
 
 The hosted backtester enforces these per session and per account. Normal strategies never come near them (the largest real session so far placed about 3,000 orders).
