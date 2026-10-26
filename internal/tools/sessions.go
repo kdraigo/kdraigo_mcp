@@ -15,12 +15,14 @@ import (
 	"github.com/kdraigo/kdraigo_mcp/internal/render"
 )
 
-// RegisterSessions adds list_sessions, get_session_detail, delete_session,
-// update_session_metadata and the ledgers: orders, positions and funding.
-// All call frontend_api/api/v1/dev/* via the kdraigo.com gateway.
+// RegisterSessions adds list_sessions, get_session_detail, close_session,
+// delete_session, update_session_metadata and the ledgers: orders, positions
+// and funding. All call frontend_api/api/v1/dev/* via the kdraigo.com gateway,
+// except close_session, which is the engine's.
 func RegisterSessions(s *server.MCPServer, d Deps) {
 	addListSessions(s, d)
 	addGetSessionDetail(s, d)
+	addCloseSession(s, d)
 	addDeleteSession(s, d)
 	addUpdateSessionMetadata(s, d)
 	addGetSessionOrders(s, d)
@@ -157,13 +159,19 @@ func renderDetail(s *sessionDetail) string {
 
 func addDeleteSession(s *server.MCPServer, d Deps) {
 	tool := mcp.NewTool("delete_session",
-		mcp.WithDescription("Delete a session and all of its data. Cannot be undone."),
+		mcp.WithDescription("Delete a session and all of its data. Cannot be undone. A session still running or waiting to resume is closed first, so it stops holding one of the account's backtest slots."),
 		mcp.WithString("session_id", mcp.Required(), mcp.Description("Session UUID")),
 		mcp.WithIdempotentHintAnnotation(true),
 	)
 	add(s, tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		id, err := req.RequireString("session_id")
 		if err != nil {
+			return toolErr(err), nil
+		}
+		// A live or parked session would otherwise keep its slot on the engine
+		// for the whole resume window after its rows are gone. One the engine
+		// no longer holds (404) or that is over (closed false) is fine.
+		if _, _, err := d.closeSession(ctx, id); err != nil {
 			return toolErr(err), nil
 		}
 		body, status, err := d.HTTP.Do(ctx, true, client.HeaderStyleStandard, http.MethodDelete, client.FrontendAPI, "/api/v1/dev/sessions/"+url.PathEscape(id), nil, nil)
@@ -356,4 +364,46 @@ func yes(b bool) string {
 		return "yes"
 	}
 	return ""
+}
+
+func addCloseSession(s *server.MCPServer, d Deps) {
+	tool := mcp.NewTool("close_session",
+		mcp.WithDescription("End a backtest session that is still running or waiting to resume, now. "+
+			"A program that was stopped or crashed leaves its session parked for an hour, holding one of the account's backtest slots: "+
+			"creating another is refused with too_many_sessions, naming the sessions that hold the slots. Close one of those. "+
+			"It ends FAILED (\"stopped by its owner\"), or DONE if it had already run to its end, and keeps its results so far. A session already over is left as it is."),
+		mcp.WithString("session_id", mcp.Required(), mcp.Description("Session UUID")),
+		mcp.WithIdempotentHintAnnotation(true),
+	)
+	add(s, tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		id, err := req.RequireString("session_id")
+		if err != nil {
+			return toolErr(err), nil
+		}
+		status, held, err := d.closeSession(ctx, id)
+		switch {
+		case err != nil:
+			return toolErr(err), nil
+		case !held:
+			return toolText(`{"closed":false,"note":"the engine holds no such session: it is over (see get_session_detail) or never existed"}`), nil
+		}
+		return toolText(status), nil
+	})
+}
+
+// closeSession asks the engine to end a session now. held is false when the
+// engine no longer holds it (it ended and was dropped, or never was); status
+// is the engine's answer otherwise.
+func (d Deps) closeSession(ctx context.Context, id string) (status string, held bool, err error) {
+	body, code, err := d.HTTP.Do(ctx, true, client.HeaderStyleBacktester, http.MethodPost, client.Backtester, "/api/v1/dev/session/"+url.PathEscape(id)+"/close", nil, nil)
+	if err != nil {
+		return "", false, err
+	}
+	switch {
+	case code == http.StatusNotFound:
+		return "", false, nil
+	case code < 200 || code >= 300:
+		return "", false, httpErr("close_session", code, body)
+	}
+	return string(body), true, nil
 }

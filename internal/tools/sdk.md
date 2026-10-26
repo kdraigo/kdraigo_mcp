@@ -489,6 +489,16 @@ not: its parked sessions are gone and `Start` returns `session_unknown`. A run's
 budget (see `## limits`) counts only time actually spent driving it — an hour
 parked costs nothing.
 
+**Stopping is not dropping.** A parked session still holds one of the account's
+sessions-at-once. dev_sdk v1.6.0 or later ends a backtest's session when the
+program is stopped: a cancelled `Start` context, Ctrl+C or SIGTERM sends the
+engine a goodbye, the session ends `FAILED` ("client closed session"), and `Start`
+returns "backtest stopped before it finished". The cloud workspace also closes
+whatever a run's key left open when the run ends. A session left parked by a
+crash or an older SDK can be ended at once with `close_session` (or
+`POST /api/v1/dev/session/{id}/close`, signed). Creating a session past the limit is
+refused with `too_many_sessions`, naming the sessions that hold the slots.
+
 Below, the leading `exchange, symbol` are omitted; `pt` = `pointType`; return is one `[]float64` + `error` unless noted.
 
 ### Overlap / moving averages
@@ -632,7 +642,11 @@ The cloud workspace builds and runs a strategy on the platform, so nothing is ne
   - `crypto/hmac|md5|rand|sha1|sha256|sha512`;
   - `text/scanner|tabwriter|template`.
 - **Refused:** everything else, among them `os/exec`, `net/...`, `unsafe`, `syscall`, `plugin`, cgo and any other module, plus `//go:linkname` and other `//go:` directives except `build`, `embed`, `generate` and `noinline`.
-- **Refused functions:** `os.StartProcess` and `os.FindProcess`. The rest of `os` stays: environment, exit, output.
+- **`os`:** only `os.Getenv`, `os.LookupEnv`, `os.Exit`, `os.Stdout`, `os.Stderr` and `os.Args`. Files, directories and processes are refused.
+- **`time`, for the backtest's sake:**
+  - `time.Now`, `time.Since` and `time.Until` are the wall clock, not the replay's. They are allowed only directly in `func main`, to set the run up (e.g. "the last 30 days"); anywhere else, callbacks and their helpers included, they are refused. Use `ctx.Now()`, the replay's clock, or the candle's `CloseTime`.
+  - `time.Sleep`, `time.After`, `time.AfterFunc`, `time.Tick`, `time.NewTicker` and `time.NewTimer` are refused everywhere: the engine waits for every callback, so sleeping stalls the run, and timers fire on the wall clock. Act on candles and order updates.
+  - Types, durations, dates and `Time` methods (`time.Date`, `time.Unix`, `time.Parse`, `time.Hour`, `t.Add`, `t.Sub`, …) stay.
 - **When it's checked:** at build time, and a refused build lists every problem as `file:line: message`.
 
 **How a run goes.**
@@ -675,7 +689,7 @@ What an account may use depends on its tier. **basic** is a Google account or a 
 | Per account or session | basic | verified | admin | When reached |
 |---|---|---|---|---|
 | Storage of finished sessions | 50 MB | 512 MB | no account cap | Create returns 403, code `storage_quota_exceeded`: delete old sessions (retrying does not help) |
-| Sessions at once (running, or waiting to be resumed) | 1 | 3 | 20 | Create returns 429, code `too_many_sessions`: let one finish or close it |
+| Sessions at once (running, or waiting to be resumed) | 1 | 3 | 20 | Create returns 429, code `too_many_sessions`, naming the sessions that hold the slots: let one finish or end it with `close_session` |
 | Pairs per session (`Assets` × `RequestedExchanges`) | 2 | 5 | no cap | Create returns 403, code `backtest_too_large`: split the pairs over several sessions |
 | Period per session, in bars of its smallest timeframe, per pair | 50,000 (about 34 days of 1m, 5.7 years of 1h) | 150,000 (about 104 days of 1m, 17.1 years of 1h) | no cap | Create returns 403, code `backtest_too_large`: shorten `StartTime`–`EndTime` or use a longer timeframe |
 | Orders per session | 20,000 | 100,000 | 1,000,000 | That order is refused with code `order_limit_reached` and the session ends `FAILED`; orders placed before it are kept |

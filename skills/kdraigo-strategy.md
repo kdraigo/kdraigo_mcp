@@ -72,6 +72,8 @@ Capture that id; every result tool takes it. The window, instruments, wallets an
 - **Cloud: a write replaces the whole file.** `workspace_write_file` takes the file's full new content, so read it first and send all of it.
 - **Cloud: pass the version you read.** The user may be editing the same file in the website's Lab. With `base_version` (the version `workspace_read_file` showed; 0 for a new file), a write over their change is refused instead of erasing it. When that happens, read the file again, keep their change, and write with the new version.
 - **Cloud: keys and endpoint come from the run.** Keep reading `KDRAIGO_KEY_ID`, `KDRAIGO_PRIVATE_KEY` and `KDRAIGO_BACKTESTER_URL` from the environment as the templates do. The run supplies its own key; a hard-coded one is refused.
+- **Wall clock.** In a backtest, time is the replay's: use `ctx.Now()` or the candle's time, never `time.Now()` in a callback. `time.Now` is allowed only in `func main` to choose the window; `time.Sleep` and timers are refused, because the engine waits for every callback. From `os`, only the environment, exit and output are available.
+- **A slot held by a dead run.** If creating a session is refused with `too_many_sessions`, the message names the sessions holding the slots. End a leftover one with `close_session` rather than waiting for its resume window.
 
 ## Conventions that make the tools more useful
 

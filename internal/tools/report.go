@@ -25,7 +25,8 @@ func addGetSessionReport(s *server.MCPServer, d Deps) {
 			"trades and win rate per side, profit factor, average win and loss, order outcomes. "+
 			"Then a table per instrument, P&L per calendar month (UTC) from daily closed-trade equity, "+
 			"and warnings about whatever makes the figures less trustworthy: a run that has not finished or stopped short of its window, few trades, "+
-			"positions still open at the end (valued at their last fill), liquidations, a result carried by one trade or one instrument, costs that eat the edge. "+
+			"positions still open at the end (valued at their last fill; a backtest's are also marked to the last close, with the final equity and return that gives), "+
+			"liquidations, a result carried by one trade or one instrument, costs that eat the edge. "+
 			"P&L counts on the day a position closes; fees on the day an order fills."),
 		mcp.WithString("session_id", mcp.Required(), mcp.Description("Session UUID")),
 		mcp.WithString("session_type", mcp.Description("Session type"), mcp.DefaultString("backtest"), mcp.Enum("backtest", "live")),
@@ -58,6 +59,9 @@ type reportInputs struct {
 	detailErr error
 	days      []seriesPoint
 	daysErr   error
+	// marks are a backtest's open positions valued at the last close.
+	marks   []positionMark
+	markErr error
 }
 
 // seriesEpoch is earlier than any session; the server clamps a series to the
@@ -91,6 +95,13 @@ func (d Deps) fetchReport(ctx context.Context, id, kind string) *reportInputs {
 		}
 	})
 	wg.Wait()
+	if kind == "backtest" && in.perfErr == nil && in.perf.Total.OpenAtEnd > 0 {
+		if end, ok := markedEnd(in.detail); ok {
+			in.marks, in.markErr = d.markOpenPositions(ctx, &in.perf, end)
+		} else {
+			in.markErr = fmt.Errorf("the session's end is unknown")
+		}
+	}
 	return in
 }
 
@@ -135,6 +146,7 @@ func renderReport(in *reportInputs) string {
 	doc.Line("Avg win %s · avg loss %s · best %s · worst %s · liquidations %d · open at end %d",
 		optSigned(t.AvgWin), optSigned(t.AvgLoss), optSigned(t.BestTrade), optSigned(t.WorstTrade), t.Liquidations, t.OpenAtEnd)
 	doc.Line("Orders placed/filled/canceled: %s", orderTallies(&t.Orders))
+	renderMarks(doc, in)
 	if p.ReportVersion >= 2 {
 		renderResearch(doc, p)
 	}
@@ -142,6 +154,9 @@ func renderReport(in *reportInputs) string {
 	warnings := reportWarnings(in)
 	if p.ReportVersion >= 2 {
 		warnings = serverWarnings(in)
+	}
+	if w := markWarning(in); w != "" {
+		warnings = append([]string{w}, warnings...)
 	}
 	if len(warnings) > 0 {
 		doc.Blank()

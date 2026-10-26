@@ -90,7 +90,7 @@ func TestReplayToolsNeedTheirSwitch(t *testing.T) {
 func TestAnnotationsSayWhatEachToolDoes(t *testing.T) {
 	t.Setenv(ReplayEnv, "1")
 	s := backend(t, nil)
-	destructive := map[string]bool{"delete_session": true, "update_session_metadata": true,
+	destructive := map[string]bool{"delete_session": true, "close_session": true, "update_session_metadata": true,
 		"workspace_write_file": true, "workspace_delete_file": true, "workspace_stop": true, "workspace_delete": true}
 	writes := map[string]bool{"scaffold_strategy": true, "create_backtest_session": true, "run_backtest_stream": true, "get_session_orders": true, "get_trades": true,
 		"workspace_create": true, "workspace_build": true, "workspace_run": true}
@@ -115,7 +115,7 @@ func reportFixture() performanceReport {
 		},
 		Instruments: []stats{
 			{Exchange: "binance_futures", Pair: "BTC/USDT", Model: "positions", NetPnL: 80, ReturnPct: ptr(8), Trades: 8, Wins: 4,
-				OpenAtEnd: 1, OpenPosition: &openPosition{Side: "long", Qty: 0.1, UnrealizedAtLastFill: 30}},
+				OpenAtEnd: 1, OpenPosition: &openPosition{Side: "long", Qty: 0.1, AvgEntry: 50000, LastFillPrice: 50300, UnrealizedAtLastFill: 30}},
 			{Exchange: "binance_futures", Pair: "ETH/USDT", Model: "positions", NetPnL: 20, ReturnPct: ptr(2), Trades: 4, Wins: 2},
 		},
 	}
@@ -146,9 +146,24 @@ func TestSessionReport(t *testing.T) {
 				dayPoint("2026-01-30", 1010), dayPoint("2026-01-31", 1005), dayPoint("2026-02-01", 1100),
 			}})(w, r)
 		},
+		// The open position is priced at the last close by the run's last candle.
+		"/data/api/v1/candles": func(w http.ResponseWriter, r *http.Request) {
+			q := r.URL.Query()
+			assert.Equal(t, "binance_futures", q.Get("exchange"))
+			assert.Equal(t, "BTC/USDT", q.Get("symbol"))
+			assert.Equal(t, "1m", q.Get("timeframe"))
+			assert.Equal(t, strconv.FormatInt(last.UnixMilli(), 10), q.Get("to"))
+			jsonReply([]map[string]any{
+				{"close": 50700.0, "close_time": last.Add(-time.Minute).UnixMilli()},
+				{"close": 50800.0, "close_time": last.UnixMilli() - 1},
+			})(w, r)
+		},
 	})
 	out, isErr := call(t, s, "get_session_report", map[string]any{"session_id": sid})
 	require.False(t, isErr, out)
+	assert.Contains(t, out, "Marked to the last close (open positions at the market, not their last fill): final equity 1150.00 · return +15.00% · +50.00 against the headline")
+	assert.Contains(t, out, "binance_futures\tBTC/USDT\tlong\t0.100000\t50000.0000\t50300.0000\t50800.0000\t2026-02-01 11:59\t+30.00\t+80.00")
+	assert.Contains(t, out, "- Open positions are worth 50.00 more at the last close than at their last fill: the headline final equity and return understate the result")
 
 	for _, want := range []string{
 		`Session ` + sid + ` "v1 ema" · backtest · RUNNING · 1h`,
@@ -451,3 +466,49 @@ func TestToolCallsHaveADeadline(t *testing.T) {
 }
 
 func ptr(v float64) *float64 { return &v }
+
+// close_session ends the session on the engine; one the engine no longer
+// holds is reported, not an error.
+func TestCloseSession(t *testing.T) {
+	closed := 0
+	s := backend(t, map[string]http.HandlerFunc{
+		"/api/v1/dev/session/" + sid + "/close": func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, http.MethodPost, r.Method)
+			assert.NotEmpty(t, r.Header.Get("X-API-KEY"), "signed for the engine")
+			closed++
+			jsonReply(map[string]any{"id": sid, "status": "FAILED", "closed": true})(w, r)
+		},
+		"/api/v1/dev/session/22222222-2222-3333-4444-555555555555/close": func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, `{"error":"session not found","code":"session_unknown"}`, http.StatusNotFound)
+		},
+	})
+	out, isErr := call(t, s, "close_session", map[string]any{"session_id": sid})
+	require.False(t, isErr, out)
+	assert.Contains(t, out, `"closed":true`)
+	assert.Equal(t, 1, closed)
+
+	out, isErr = call(t, s, "close_session", map[string]any{"session_id": "22222222-2222-3333-4444-555555555555"})
+	require.False(t, isErr, out)
+	assert.Contains(t, out, "the engine holds no such session")
+}
+
+// delete_session closes a live session on the engine before deleting its
+// record, so it stops holding a slot; one the engine no longer holds is just
+// deleted.
+func TestDeleteSessionClosesFirst(t *testing.T) {
+	var order []string
+	s := backend(t, map[string]http.HandlerFunc{
+		"/api/v1/dev/session/" + sid + "/close": func(w http.ResponseWriter, r *http.Request) {
+			order = append(order, "close")
+			http.Error(w, `{"code":"session_unknown"}`, http.StatusNotFound)
+		},
+		"/frontend-api/api/v1/dev/sessions/" + sid: func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, http.MethodDelete, r.Method)
+			order = append(order, "delete")
+			w.WriteHeader(http.StatusNoContent)
+		},
+	})
+	out, isErr := call(t, s, "delete_session", map[string]any{"session_id": sid})
+	require.False(t, isErr, out)
+	assert.Equal(t, []string{"close", "delete"}, order)
+}
