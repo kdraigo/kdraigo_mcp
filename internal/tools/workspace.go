@@ -19,8 +19,8 @@ import (
 
 // RegisterWorkspace adds the cloud workspace tools. A workspace is a strategy's
 // .go files kept on the platform; workspace_service builds and runs them on a
-// sandbox machine of the caller's own, so no local Go, keys or checkout are
-// needed. All call workspace_service/api/v1/dev/* via the kdraigo.com gateway.
+// sandbox machine (the caller's own on admin and paid tiers, shared on free
+// ones), so no local Go, keys or checkout are needed. All call workspace_service/api/v1/dev/* via the kdraigo.com gateway.
 func RegisterWorkspace(s *server.MCPServer, d Deps) {
 	addWorkspaceCreate(s, d)
 	addWorkspaceList(s, d)
@@ -57,22 +57,26 @@ type (
 		Files     []workspaceFile `json:"files"`
 	}
 	workspaceRun struct {
-		ID           string     `json:"id"`
-		WorkspaceID  string     `json:"workspace_id"`
-		Kind         string     `json:"kind"`
-		Status       string     `json:"status"`
-		Active       bool       `json:"active"`
-		SDKVersion   string     `json:"sdk_version"`
-		EnvNames     []string   `json:"env_names"`
-		KeyID        string     `json:"key_id"`
-		ExitCode     *int       `json:"exit_code"`
-		Error        *string    `json:"error"`
-		Output       *string    `json:"output"`
-		LogBytes     int        `json:"log_bytes"`
-		LogTruncated bool       `json:"log_truncated"`
-		CreatedAt    time.Time  `json:"created_at"`
-		StartedAt    *time.Time `json:"started_at"`
-		FinishedAt   *time.Time `json:"finished_at"`
+		ID          string `json:"id"`
+		WorkspaceID string `json:"workspace_id"`
+		Kind        string `json:"kind"`
+		Status      string `json:"status"`
+		Active      bool   `json:"active"`
+		// Pool is dedicated (a machine of the user's own) or shared;
+		// QueuePosition is a queued shared run's place, from 1.
+		Pool          string     `json:"pool"`
+		QueuePosition int        `json:"queue_position"`
+		SDKVersion    string     `json:"sdk_version"`
+		EnvNames      []string   `json:"env_names"`
+		KeyID         string     `json:"key_id"`
+		ExitCode      *int       `json:"exit_code"`
+		Error         *string    `json:"error"`
+		Output        *string    `json:"output"`
+		LogBytes      int        `json:"log_bytes"`
+		LogTruncated  bool       `json:"log_truncated"`
+		CreatedAt     time.Time  `json:"created_at"`
+		StartedAt     *time.Time `json:"started_at"`
+		FinishedAt    *time.Time `json:"finished_at"`
 	}
 	workspaceLog struct {
 		Offset    int    `json:"offset"`
@@ -108,7 +112,7 @@ func waitArg(req mcp.CallToolRequest, def time.Duration) time.Duration {
 
 func addWorkspaceCreate(s *server.MCPServer, d Deps) {
 	tool := mcp.NewTool("workspace_create",
-		mcp.WithDescription("Create a cloud workspace: a strategy's .go files kept on the platform, built and run on a sandbox machine of your own (no local Go or keys needed). "+
+		mcp.WithDescription("Create a cloud workspace: a strategy's .go files kept on the platform, built and run on a platform sandbox machine (no local Go or keys needed). "+
 			"It starts from a template (basic, with-indicators, with-risk-manager) on a dev_sdk version; the platform owns go.mod, so a workspace holds flat .go files in package main only. "+
 			"Then edit with workspace_write_file and run with workspace_run. Read get_sdk_docs section=\"cloud workspace\" first."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Workspace name: starts with a letter; letters, digits, _ and -; unique per account")),
@@ -273,8 +277,8 @@ func addWorkspaceDeleteFile(s *server.MCPServer, d Deps) {
 
 func addWorkspaceBuild(s *server.MCPServer, d Deps) {
 	tool := mcp.NewTool("workspace_build",
-		mcp.WithDescription("Compile a workspace on your sandbox machine without running it: the fast check after an edit. Returns the import check's or the compiler's errors as file:line: message. "+
-			"The first build after a while starts your machine (about 40 s)."),
+		mcp.WithDescription("Compile a workspace on a sandbox machine without running it: the fast check after an edit. Returns the import check's or the compiler's errors as file:line: message. "+
+			"A machine that has to start takes about 40 s; on a verified account a full shared pool queues the build."),
 		mcp.WithString("workspace_id", mcp.Required(), mcp.Description("Workspace UUID")),
 		mcp.WithNumber("wait", mcp.Description("Seconds to wait for the result, at most 170"), mcp.DefaultNumber(defaultBuildWait.Seconds())),
 		additive(false),
@@ -290,7 +294,7 @@ func addWorkspaceBuild(s *server.MCPServer, d Deps) {
 
 func addWorkspaceRun(s *server.MCPServer, d Deps) {
 	tool := mcp.NewTool("workspace_run",
-		mcp.WithDescription("Build a workspace and run it on your sandbox machine: the strategy opens its backtest session with a key minted for this run alone (revoked when it ends). "+
+		mcp.WithDescription("Build a workspace and run it on a sandbox machine: the strategy opens its backtest session with a key minted for this run alone (revoked when it ends). "+
 			"Waits up to `wait` seconds; a run still going returns its id for workspace_run_status. The result names the backtest sessions the run made: pass one to get_session_report. "+
 			"`env` sets your own variables (upper-case names, not KDRAIGO_*), e.g. {\"STRATEGY_RISK\":\"0.02\"}."),
 		mcp.WithString("workspace_id", mcp.Required(), mcp.Description("Workspace UUID")),
@@ -398,6 +402,9 @@ func renderRunHead(doc *render.Doc, r *workspaceRun) {
 		kind = strings.ToUpper(kind[:1]) + kind[1:]
 	}
 	head := fmt.Sprintf("%s %s: %s", kind, r.ID, r.Status)
+	if r.Status == "queued" && r.QueuePosition > 0 {
+		head += fmt.Sprintf(", number %d in line for a shared machine", r.QueuePosition)
+	}
 	if r.ExitCode != nil && !r.Active {
 		head += fmt.Sprintf(", exit %d", *r.ExitCode)
 	}

@@ -134,6 +134,18 @@ func TestWorkspaceRunStatus_StillGoing(t *testing.T) {
 	assert.Contains(t, out, "workspace_run_status run_id="+runID+" wait=120")
 }
 
+func TestWorkspaceRunStatus_Queued(t *testing.T) {
+	s := backend(t, map[string]http.HandlerFunc{
+		wsRoute("/runs/" + runID): jsonReply(map[string]any{"id": runID, "kind": "run", "status": "queued", "active": true,
+			"pool": "shared", "queue_position": 3}),
+		"/frontend-api/api/v1/dev/sessions": jsonReply([]any{}),
+	})
+	out, isErr := call(t, s, "workspace_run_status", map[string]any{"run_id": runID})
+	require.False(t, isErr, out)
+	assert.Contains(t, out, "Run "+runID+": queued, number 3 in line for a shared machine.")
+	assert.Contains(t, out, "Still queued: workspace_run_status run_id="+runID)
+}
+
 func TestWorkspaceLogs_Pages(t *testing.T) {
 	s := backend(t, map[string]http.HandlerFunc{
 		wsRoute("/runs/" + runID + "/log"): func(w http.ResponseWriter, r *http.Request) {

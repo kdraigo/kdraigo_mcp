@@ -100,7 +100,7 @@ Results come back as a few header lines and tab-separated tables, with no JSON, 
 | `workspace_read_file` | A file's full content. |
 | `workspace_write_file` | Creates or replaces a file (flat `.go` files; the platform owns `go.mod`). |
 | `workspace_delete_file` | Deletes a file. |
-| `workspace_build` | Compiles on the caller's sandbox machine; returns import-check or compiler errors as `file:line: message`. |
+| `workspace_build` | Compiles on a sandbox machine; returns import-check or compiler errors as `file:line: message`. |
 | `workspace_run` | Builds and runs on the sandbox machine with a key minted for the run; waits up to `wait` s and names the backtest sessions it made. Takes your own `env`. |
 | `workspace_run_status` | A build's or run's status, sessions and last lines of output; `wait` follows one still going. |
 | `workspace_logs` | A run's output, paged by byte offset (capped at 1 MB per run). |
@@ -112,7 +112,7 @@ Results come back as a few header lines and tab-separated tables, with no JSON, 
 
 ## Cloud workspace
 
-The `workspace_*` tools write, build and run a strategy on the platform: no local Go, checkout or keys. The workspace service compiles it offline on a sandbox machine of the caller's own, then runs it with a key minted for that run alone, which can only open backtest sessions and is revoked when the run ends. Under gVisor the program can reach nothing but the platform API. `get_sdk_docs section="cloud workspace"` has the rules (flat `.go` files, allowed imports, `env`, limits). It is in beta for admin accounts first.
+The `workspace_*` tools write, build and run a strategy on the platform: no local Go, checkout or keys. The workspace service compiles it offline on a sandbox machine (the caller's own on admin accounts, shared with other users' runs, each in its own container, on verified ones), then runs it with a key minted for that run alone, which can only open backtest sessions and is revoked when the run ends. Under gVisor the program can reach nothing but the platform API. `get_sdk_docs section="cloud workspace"` has the rules (flat `.go` files, allowed imports, `env`, limits). It is in beta for admin accounts first.
 
 ## Authentication model
 

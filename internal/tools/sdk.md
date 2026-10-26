@@ -630,7 +630,9 @@ The cloud workspace builds and runs a strategy on the platform, so nothing is ne
 - **When it's checked:** at build time, and a refused build lists every problem as `file:line: message`.
 
 **How a run goes.**
-1. `workspace_build` (or the build inside `workspace_run`) compiles offline on a machine of your own. Your first build after a while starts that machine (about 40 s), and later builds take seconds.
+1. `workspace_build` (or the build inside `workspace_run`) compiles offline on a sandbox machine. A machine that has to start takes about 40 s; later builds take seconds.
+   - **Admin accounts** (and paid ones, later) get a machine of their own.
+   - **Verified accounts** share machines with other users' runs, each run in its own isolated container. When they are full, a run waits in a queue (`queued`; `workspace_run_status` shows its place) for at most 30 minutes, and its time counts only once it starts. A shared machine keeps no binary after its run.
 2. `workspace_run` then runs the binary with:
    - `KDRAIGO_KEY_ID` and `KDRAIGO_PRIVATE_KEY`: a key minted for this run alone, which can only open and stream backtest sessions and is revoked when the run ends;
    - `KDRAIGO_BACKTESTER_URL`: the backtester to use.
@@ -653,6 +655,7 @@ The cloud workspace builds and runs a strategy on the platform, so nothing is ne
 | Machine time per day (UTC) | — | 4 h | 24 h |
 | Workspaces | — | 10 | 50 |
 | Time per run | — | 1 h | 12 h |
+| Machine | — | shared, queued | own |
 
 The workspace is in beta, open to admin accounts first: others get 403 with that message.
 
