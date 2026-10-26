@@ -626,6 +626,7 @@ The cloud workspace builds and runs a strategy on the platform, so nothing is ne
   - `crypto/hmac|md5|rand|sha1|sha256|sha512`;
   - `text/scanner|tabwriter|template`.
 - **Refused:** everything else, among them `os/exec`, `net/...`, `unsafe`, `syscall`, `plugin`, cgo and any other module, plus `//go:linkname` and other `//go:` directives except `build`, `embed`, `generate` and `noinline`.
+- **Refused functions:** `os.StartProcess` and `os.FindProcess`. The rest of `os` stays: environment, exit, output.
 - **When it's checked:** at build time, and a refused build lists every problem as `file:line: message`.
 
 **How a run goes.**
@@ -640,7 +641,10 @@ The cloud workspace builds and runs a strategy on the platform, so nothing is ne
 
 **Your own settings** go in `workspace_run`'s `env`: upper-case names, at most 32 of them, values up to 4 KB with no line breaks, and never a `KDRAIGO_` name. A run records the names it was given, never the values.
 
-**Limits per account.** A run's wall-clock time is the tier's session run time (`## limits`), and its output is kept up to 1 MB.
+**Limits per run.**
+- **Wall-clock time:** at most verified 1 h, admin 12 h, and never more than the account's machine time left today.
+- **Stalls:** a run that prints nothing and moves (almost) no network traffic for **5 minutes** is stopped as `stalled`. That catches a strategy that sleeps or deadlocks (for example a mutex locked twice); a backtest that is streaming candles is never quiet that long.
+- **Output:** kept up to 1 MB.
 
 | | basic | verified | admin |
 |---|---|---|---|
@@ -648,6 +652,7 @@ The cloud workspace builds and runs a strategy on the platform, so nothing is ne
 | Runs at once | — | 1 | 4 |
 | Machine time per day (UTC) | — | 4 h | 24 h |
 | Workspaces | — | 10 | 50 |
+| Time per run | — | 1 h | 12 h |
 
 The workspace is in beta, open to admin accounts first: others get 403 with that message.
 
