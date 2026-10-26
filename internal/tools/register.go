@@ -15,6 +15,17 @@ import (
 const ReplayEnv = "KDRAIGO_MCP_ENABLE_REPLAY"
 
 // Register adds every tool.
+// RegisterHosted adds what the hosted server (kdraigo-mcp serve) offers: the
+// same tools less those that touch the caller's own disk (scaffold_strategy)
+// and the candle replay.
+func RegisterHosted(s *server.MCPServer, d Deps) {
+	RegisterDocs(s)
+	RegisterSessions(s, d)
+	RegisterAnalytics(s, d)
+	RegisterCandles(s, d)
+	RegisterWorkspace(s, d)
+}
+
 func Register(s *server.MCPServer, d Deps) {
 	RegisterDocs(s)
 	RegisterScaffold(s)

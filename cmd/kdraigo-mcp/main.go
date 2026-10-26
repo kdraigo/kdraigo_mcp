@@ -40,6 +40,12 @@ func main() {
 				os.Exit(1)
 			}
 			return
+		case "serve":
+			if err := serve(os.Args[2:]); err != nil {
+				fmt.Fprintln(os.Stderr, "serve:", err)
+				os.Exit(1)
+			}
+			return
 		case "version", "-v", "--version":
 			fmt.Println("kdraigo-mcp", resolveVersion())
 			return
@@ -78,6 +84,8 @@ Usage:
   kdraigo-mcp                  Start the stdio MCP server (default; called by Claude Code).
   kdraigo-mcp install-skill [--project <dir>]
                                Install the skills into ~/.claude/skills/ (or <dir>/.claude/skills/).
+  kdraigo-mcp serve --http     Run as the hosted remote MCP server (mcp.kdraigo.com): AI apps sign
+                               the user in with OAuth. Configured by KDRAIGO_MCP_* (see serve.go).
   kdraigo-mcp version          Print version.
   kdraigo-mcp help             Show this help.
 

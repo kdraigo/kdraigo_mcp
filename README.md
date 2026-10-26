@@ -2,7 +2,10 @@
 
 Model Context Protocol server for the [kdraigo](https://kdraigo.com) algorithmic trading platform. Drop one binary into your `mcpServers` config and Claude Code (or any MCP client) can scaffold strategies, run backtests, fetch analytics, and iterate end-to-end against the kdraigo backend.
 
-Transport is **stdio** — the binary is launched as a subprocess by your MCP client. No hosting, no port, no public surface. The binary signs each outbound request to `kdraigo.com` with your Ed25519 key.
+Two ways to use it:
+
+- **Hosted** at `https://mcp.kdraigo.com/mcp`: add that URL to claude.ai, ChatGPT, Gemini CLI or Claude Code as a remote MCP server, sign in with your wallet on kdraigo.com, and nothing runs on your machine. See [Hosted server](#hosted-server).
+- **Local**, over **stdio**: the binary is launched as a subprocess by your MCP client. No hosting, no port, no public surface. It signs each outbound request to `kdraigo.com` with your Ed25519 key.
 
 ---
 
@@ -114,6 +117,15 @@ Results come back as a few header lines and tab-separated tables, with no JSON, 
 
 The `workspace_*` tools write, build and run a strategy on the platform: no local Go, checkout or keys. The workspace service compiles it offline on a sandbox machine (the caller's own on admin accounts, shared with other users' runs, each in its own container, on verified ones), then runs it with a key minted for that run alone, which can only open backtest sessions and is revoked when the run ends. Under gVisor the program can reach nothing but the platform API. `get_sdk_docs section="cloud workspace"` has the rules (flat `.go` files, allowed imports, `env`, limits). It is in beta for admin accounts first.
 
+## Hosted server
+
+`kdraigo-mcp serve --http` is the same tool set as a remote MCP server (streamable HTTP, stateless), as run at `mcp.kdraigo.com`. It leaves out `scaffold_strategy`, which writes to the caller's disk, and the replay tools; strategies run in the cloud workspace.
+
+- **Sign-in** is OAuth 2.1 against the platform's authorization server (users_service), per the MCP authorization spec: an unauthenticated request gets `401` with `WWW-Authenticate: Bearer resource_metadata=…`, and the server serves its protected-resource metadata (RFC 9728) at `/.well-known/oauth-protected-resource[/mcp]`. Apps register with a Client ID Metadata Document or Dynamic Client Registration, use PKCE S256, and get tokens bound to the server's URL.
+- **Each request's token** is introspected on users_service's internal port (cached for a minute) and must name this server as its audience.
+- **Platform calls** are signed with an API key minted for that connected app (24 h, renewed): the app's token never leaves the server. Disconnecting the app on kdraigo.com's Account page revokes both.
+- **Configuration:** `KDRAIGO_MCP_RESOURCE`, `KDRAIGO_MCP_ISSUER`, `KDRAIGO_MCP_USERS_INTERNAL_URL`, `KDRAIGO_MCP_INTERNAL_TOKEN`, `KDRAIGO_MCP_ADDR` (see `cmd/kdraigo-mcp/serve.go`). The `Dockerfile` builds the image; the `image` workflow publishes it on a release tag.
+
 ## Authentication model
 
 Requests are signed with **signing version 2**, the only version the platform accepts since 2026-10-11 (kdraigo-mcp v1.0.9+, dev_sdk v1.3.0+). Every signed request carries:
@@ -134,6 +146,7 @@ kdraigo_mcp/
     config/                config.yaml loader
     auth/                  Ed25519 signer
     client/                signed HTTP + WS clients
+    hosted/                the remote server: OAuth resource, introspection, per-app keys
     render/                header + TSV rendering under the output cap
     tools/                 the MCP tools, embedded SDK + indicator docs
   skills/                  the skills, embedded into the binary

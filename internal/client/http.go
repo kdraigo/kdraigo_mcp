@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -73,8 +74,25 @@ func (h *HTTP) baseFor(svc ServicePrefix) string {
 	return h.endpoint
 }
 
-// Signer exposes the configured Ed25519 signer.
-func (h *HTTP) Signer() *auth.Signer { return h.signer }
+type signerKey struct{}
+
+// WithSigner returns ctx carrying the key to sign this call's requests with:
+// in the hosted server, the key minted for the user's connected app. Without
+// one the client's own key (stdio, ~/.kdraigo/config.yaml) signs.
+func WithSigner(ctx context.Context, s *auth.Signer) context.Context {
+	return context.WithValue(ctx, signerKey{}, s)
+}
+
+// SignerFor returns the key that signs a call made with ctx.
+func (h *HTTP) SignerFor(ctx context.Context) (*auth.Signer, error) {
+	if s, ok := ctx.Value(signerKey{}).(*auth.Signer); ok && s != nil {
+		return s, nil
+	}
+	if h.signer == nil {
+		return nil, errors.New("no API key to sign the request with")
+	}
+	return h.signer, nil
+}
 
 // Do issues a JSON request. `style` chooses header naming; pass HeaderStyleStandard
 // for the lib/auth path or HeaderStyleBacktester for the backtester_engine controller.
@@ -104,6 +122,10 @@ func (h *HTTP) Do(ctx context.Context, signed bool, style HeaderStyle, method st
 	}
 
 	if signed {
+		signer, err := h.SignerFor(ctx)
+		if err != nil {
+			return nil, 0, err
+		}
 		ts := strconv.FormatInt(time.Now().Unix(), 10)
 		nonce, err := auth.NewNonce()
 		if err != nil {
@@ -111,14 +133,14 @@ func (h *HTTP) Do(ctx context.Context, signed bool, style HeaderStyle, method st
 		}
 		// Signing version 2: the upstream path (nginx strips the service
 		// prefix before forwarding), the query and a one-time nonce.
-		sig := h.signer.SignV2(method, path, query, ts, nonce, bodyBytes)
+		sig := signer.SignV2(method, path, query, ts, nonce, bodyBytes)
 		switch style {
 		case HeaderStyleBacktester:
-			req.Header.Set("X-API-KEY", h.signer.KeyID())
+			req.Header.Set("X-API-KEY", signer.KeyID())
 			req.Header.Set("X-SIGNATURE", sig)
 			req.Header.Set("X-TIMESTAMP", ts)
 		default:
-			req.Header.Set("X-Key-ID", h.signer.KeyID())
+			req.Header.Set("X-Key-ID", signer.KeyID())
 			req.Header.Set("X-Signature", sig)
 			req.Header.Set("X-Timestamp", ts)
 		}
