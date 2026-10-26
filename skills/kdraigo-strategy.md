@@ -12,7 +12,7 @@ You develop strategies on the kdraigo platform. Platform data comes through the 
 A strategy is a Go program built on dev_sdk. Running it creates a backtest session on the engine and drives it with the strategy's own code. It runs one of two ways:
 
 - **Cloud workspace** (no local Go, checkout or keys): `workspace_create` from a template, `workspace_write_file`, then `workspace_run`.
-  - The platform builds and runs it on a sandbox machine: the user's own (admin), or shared with other users' runs (verified), where a run may wait in a queue first.
+  - The platform builds and runs it on a sandbox machine: the user's own (admin), or shared with other users' runs (verified, or signed in with Google), where a run may wait in a queue first.
   - The result lists the backtest sessions the run made.
   - A workspace is flat `.go` files with a fixed set of allowed imports. Read `get_sdk_docs section="cloud workspace"` before writing one.
   - Use it when the user has no local setup or asks for it.

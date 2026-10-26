@@ -632,7 +632,7 @@ The cloud workspace builds and runs a strategy on the platform, so nothing is ne
 **How a run goes.**
 1. `workspace_build` (or the build inside `workspace_run`) compiles offline on a sandbox machine. A machine that has to start takes about 40 s; later builds take seconds.
    - **Admin accounts** (and paid ones, later) get a machine of their own.
-   - **Verified accounts** share machines with other users' runs, each run in its own isolated container. When they are full, a run waits in a queue (`queued`; `workspace_run_status` shows its place) for at most 30 minutes, and its time counts only once it starts. A shared machine keeps no binary after its run.
+   - **Verified accounts, and accounts signed in with Google,** share machines with other users' runs, each run in its own isolated container. When they are full, a run waits in a queue (`queued`; `workspace_run_status` shows its place) for at most 30 minutes, and its time counts only once it starts. A shared machine keeps no binary after its run.
 2. `workspace_run` then runs the binary with:
    - `KDRAIGO_KEY_ID` and `KDRAIGO_PRIVATE_KEY`: a key minted for this run alone, which can only open and stream backtest sessions and is revoked when the run ends;
    - `KDRAIGO_BACKTESTER_URL`: the backtester to use.
@@ -644,26 +644,27 @@ The cloud workspace builds and runs a strategy on the platform, so nothing is ne
 **Your own settings** go in `workspace_run`'s `env`: upper-case names, at most 32 of them, values up to 4 KB with no line breaks, and never a `KDRAIGO_` name. A run records the names it was given, never the values.
 
 **Limits per run.**
-- **Wall-clock time:** at most verified 1 h, admin 12 h, and never more than the account's machine time left today.
+- **Wall-clock time:** at most 1 h (verified, Google sign-in), admin 12 h, and never more than the account's machine time left today.
+- **Runs per day:** 200 (UTC), builds and refused ones included; admin has no cap.
 - **Stalls:** a run that prints nothing and moves (almost) no network traffic for **5 minutes** is stopped as `stalled`. That catches a strategy that sleeps or deadlocks (for example a mutex locked twice); a backtest that is streaming candles is never quiet that long.
 - **Output:** kept up to 1 MB.
 
-| | basic | verified | admin |
-|---|---|---|---|
-| Cloud workspace | no (link Telegram) | yes | yes |
-| Runs at once | — | 1 | 4 |
-| Machine time per day (UTC) | — | 4 h | 24 h |
-| Workspaces | — | 10 | 50 |
-| Time per run | — | 1 h | 12 h |
-| Machine | — | shared, queued | own |
+| | basic, wallet | basic, Google sign-in | verified | admin |
+|---|---|---|---|---|
+| Cloud workspace | no (link Telegram) | yes | yes | yes |
+| Runs at once | — | 1 | 1 | 4 |
+| Machine time per day (UTC) | — | 1 h | 4 h | 24 h |
+| Workspaces | — | 3 | 10 | 50 |
+| Time per run | — | 1 h | 1 h | 12 h |
+| Machine | — | shared, queued | shared, queued | own |
 
-The workspace is in beta, open to admin accounts first: others get 403 with that message.
+Linking Telegram on the website's Account page makes an account verified. An account's newest 50 runs keep their source and output (`workspace_logs`); older runs keep only their record, and records go after 30 days.
 
 ## limits
 
 The hosted backtester enforces these per session and per account. Normal strategies never come near them (the largest real session so far placed about 3,000 orders).
 
-What an account may use depends on its tier. **basic** is a wallet only; **verified** has a Telegram account linked on the website's account page (one Telegram account verifies one wallet, and after it is unlinked it cannot verify another wallet for 30 days); **admin** is set by the operator. The website's Account page shows the account's tier, its limits and the storage its sessions use; each finished session in `list_sessions` carries its `storage_bytes`.
+What an account may use depends on its tier. **basic** is a Google account or a wallet alone (a Google account also gets a small cloud workspace, above); **verified** has a Telegram account linked on the website's account page (one Telegram account verifies one kdraigo account, and after it is unlinked it cannot verify another account for 30 days); **admin** is set by the operator. The website's Account page shows the account's tier, its limits and the storage its sessions use; each finished session in `list_sessions` carries its `storage_bytes`.
 
 | Per account or session | basic | verified | admin | When reached |
 |---|---|---|---|---|
