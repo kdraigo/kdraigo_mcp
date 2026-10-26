@@ -669,6 +669,8 @@ What an account may use depends on its tier. **basic** is a wallet only; **verif
 |---|---|---|---|---|
 | Storage of finished sessions | 50 MB | 512 MB | no account cap | Create returns 403, code `storage_quota_exceeded`: delete old sessions (retrying does not help) |
 | Sessions at once (running, or waiting to be resumed) | 1 | 3 | 20 | Create returns 429, code `too_many_sessions`: let one finish or close it |
+| Pairs per session (`Assets` × `RequestedExchanges`) | 2 | 5 | no cap | Create returns 403, code `backtest_too_large`: split the pairs over several sessions |
+| Period per session, in bars of its smallest timeframe, per pair | 50,000 (about 34 days of 1m, 5.7 years of 1h) | 150,000 (about 104 days of 1m, 17.1 years of 1h) | no cap | Create returns 403, code `backtest_too_large`: shorten `StartTime`–`EndTime` or use a longer timeframe |
 | Orders per session | 20,000 | 100,000 | 1,000,000 | That order is refused with code `order_limit_reached` and the session ends `FAILED`; orders placed before it are kept |
 | Stored reasoning per session | 8 MB | 64 MB | 256 MB of `Reason` + `Logs` | Orders keep executing; one response carries `warning`, and later reasoning is not stored |
 | Stored plot values per session (`## plots`) | 8 MB | 64 MB | 256 MB | The run continues with a `warning`. A backtest stores no later values; a live session drops its oldest |
