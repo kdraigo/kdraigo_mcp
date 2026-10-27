@@ -82,7 +82,8 @@ Key types you will touch:
 - `types.Context` — provided to every callback; exposes `PlaceOrder`, `CancelOrder`, `Now`, `GetIndicator`, the `Config`, and the `Trader` (paper or live).
 - `types.Timeframe` — string-backed; constants `Timeframe1m`, `Timeframe2m`, `Timeframe3m`, `Timeframe5m`, `Timeframe15m`, `Timeframe30m`, `Timeframe1h`, `Timeframe2h`, `Timeframe4h`, `Timeframe1d`, `Timeframe1w`, `Timeframe1M`.
   - `1w` weeks start Monday 00:00 UTC; `1M` is the calendar month (case matters: `1M` is a month, `1m` a minute).
-  - Start a weekly or monthly run on a boundary (a Monday, the 1st): a run starting mid-week gets a partial first bar, labelled as a full one.
+  - dev_sdk v1.8.0 and later round a backtest's start up to the largest timeframe's boundary (a Monday for `1w`, the 1st for `1M`) before the session starts, so the first bar is a whole one. Earlier versions rounded after the session existed, so a run starting mid-week got a partial first weekly bar labelled as a full one: start those on a boundary.
+  - **Bars the SDK folds from a smaller timeframe** (4h when you also ask for 1h) close on their boundary since dev_sdk v1.8.0: a 4h bar is 00:00–04:00. Up to v1.7.0 they closed one smaller candle late (01:00–05:00 from 1h, a day from 01:00 UTC), in backtests and live alike. A multi-timeframe strategy's results change when it moves to v1.8.0: compare it against a baseline run on the same version.
   All of these are now genuinely aggregated server-side. Previously `3m`, `30m` and `2h` were
   accepted but silently served as **1-minute** data, so any strategy calibrated on them before
   2026-08 was computing on the wrong bars. An unsupported timeframe is now a hard error rather
