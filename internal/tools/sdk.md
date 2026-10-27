@@ -736,7 +736,7 @@ The cloud workspace builds and runs a strategy on the platform, so nothing is ne
 **Limits per run.**
 - **Wall-clock time:** at most 1 h (verified, Google sign-in), admin 12 h, and never more than the account's machine time left today.
 - **Runs per day:** 200 (UTC), builds and refused ones included; admin has no cap.
-- **Stalls:** a run that prints nothing and moves (almost) no network traffic for **5 minutes** is stopped as `stalled`. That catches a strategy that sleeps or deadlocks (for example a mutex locked twice); a backtest that is streaming candles is never quiet that long.
+- **Stalls:** a run that prints nothing and moves (almost) no network traffic for **5 minutes** is stopped as `stalled`. That catches a strategy that sleeps or deadlocks (for example a mutex locked twice); a backtest that is streaming candles is never quiet that long. Since dev_sdk v1.8.1 a callback that has not returned after a minute logs one warning naming its candle ("the callbacks for the candle closing … have not returned"), and the run waits for it; older versions stepped past a blocked callback every 15 s, so a deadlock ran on until the time cap.
 - **Output:** kept up to 1 MB.
 
 | | basic, wallet | basic, Google sign-in | verified | admin |
