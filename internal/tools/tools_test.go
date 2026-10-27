@@ -512,3 +512,21 @@ func TestDeleteSessionClosesFirst(t *testing.T) {
 	require.False(t, isErr, out)
 	assert.Equal(t, []string{"close", "delete"}, order)
 }
+
+// get_data_coverage lists each market's first and last bar, filtered.
+func TestDataCoverage(t *testing.T) {
+	s := backend(t, map[string]http.HandlerFunc{
+		"/data/api/v1/metadata": func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(`{"binance":{"symbols":{"BTCUSDT":{"start":1740787200000,"end":1793050380000},"ETHUSDT":{"start":1740787200000,"end":1793050380000}}},` +
+				`"binance_futures":{"symbols":{"BTCUSDT":{"start":1704067200000,"end":1793050380000}}}}`))
+		},
+	})
+	out, isErr := call(t, s, "get_data_coverage", map[string]any{"symbol": "BTC/USDT"})
+	require.False(t, isErr, out)
+	assert.Contains(t, out, "binance\tBTCUSDT\t2025-03-01\t")
+	assert.Contains(t, out, "binance_futures\tBTCUSDT\t2024-01-01\t")
+	assert.NotContains(t, out, "ETHUSDT")
+
+	out, _ = call(t, s, "get_data_coverage", map[string]any{"exchange": "kraken"})
+	assert.Contains(t, out, "No history")
+}

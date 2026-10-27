@@ -33,7 +33,8 @@ Capture that id; every result tool takes it. The window, instruments, wallets an
 3. **Write the hypothesis down before running.** What changes, why it should work (the mechanism), and the rule that decides it, e.g. "return/DD ≥ baseline × 1.1 on the test window and at least 6/10 instruments positive". Pick the train, test and hold-out windows now. The hold-out stays untouched until the rule is frozen.
 4. **Run.**
    - **Cloud:** `workspace_run` waits up to 150 s. For a longer run, follow it with `workspace_run_status run_id=… wait=120`. Its result names the session ids.
-     - A refused or failed build lists `file:line` problems: fix and run again.
+     - A refused or failed build lists `file:line` problems: fix and run again. A refused run can also be its declared backtest (no data for a pair, a start before the data, over the account's caps): change that parameter.
+     - Warnings come with the run: fix those that apply to this strategy (randomness, goroutines, an order without a `Reason`, no stop) before trusting its result.
      - `workspace_build` alone is the quick compile check after an edit.
    - **Locally:** `go run .` from the strategy folder. Run anything longer than a few minutes in the background and capture the log. Take the session id from the log line above.
    - Either way, `get_session_detail` or `list_sessions` show status and progress while it runs.
@@ -72,6 +73,7 @@ Capture that id; every result tool takes it. The window, instruments, wallets an
 - **Cloud: a write replaces the whole file.** `workspace_write_file` takes the file's full new content, so read it first and send all of it.
 - **Cloud: pass the version you read.** The user may be editing the same file in the website's Lab. With `base_version` (the version `workspace_read_file` showed; 0 for a new file), a write over their change is refused instead of erasing it. When that happens, read the file again, keep their change, and write with the new version.
 - **Cloud: keys and endpoint come from the run.** Keep reading `KDRAIGO_KEY_ID`, `KDRAIGO_PRIVATE_KEY` and `KDRAIGO_BACKTESTER_URL` from the environment as the templates do. The run supplies its own key; a hard-coded one is refused.
+- **Declare the settings.** Every number a user might tune, the pairs, the capital and the backtest window go through `dev_sdk/params` with literal names and defaults (get_sdk_docs section="parameters"), not constants or `os.Getenv`. The user can then re-run from the website's form without you.
 - **Wall clock.** In a backtest, time is the replay's: use `ctx.Now()` or the candle's time, never `time.Now()` in a callback. `time.Now` is allowed only in `func main` to choose the window; `time.Sleep` and timers are refused, because the engine waits for every callback. From `os`, only the environment, exit and output are available.
 - **A slot held by a dead run.** If creating a session is refused with `too_many_sessions`, the message names the sessions holding the slots. End a leftover one with `close_session` rather than waiting for its resume window.
 

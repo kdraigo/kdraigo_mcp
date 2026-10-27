@@ -31,6 +31,7 @@ func RegisterWorkspace(s *server.MCPServer, d Deps) {
 	addWorkspaceWriteFile(s, d)
 	addWorkspaceDeleteFile(s, d)
 	addWorkspaceBuild(s, d)
+	addWorkspaceParams(s, d)
 	addWorkspaceRun(s, d)
 	addWorkspaceRunStatus(s, d)
 	addWorkspaceLogs(s, d)
@@ -69,21 +70,28 @@ type (
 		Kind        string `json:"kind"`
 		Status      string `json:"status"`
 		Active      bool   `json:"active"`
+		// AlreadyRunning: the start matched a run already going with the same
+		// source and settings (a retry), and this is that run.
+		AlreadyRunning bool `json:"already_running"`
 		// Pool is dedicated (a machine of the user's own) or shared;
 		// QueuePosition is a queued shared run's place, from 1.
-		Pool          string     `json:"pool"`
-		QueuePosition int        `json:"queue_position"`
-		SDKVersion    string     `json:"sdk_version"`
-		EnvNames      []string   `json:"env_names"`
-		KeyID         string     `json:"key_id"`
-		ExitCode      *int       `json:"exit_code"`
-		Error         *string    `json:"error"`
-		Output        *string    `json:"output"`
-		LogBytes      int        `json:"log_bytes"`
-		LogTruncated  bool       `json:"log_truncated"`
-		CreatedAt     time.Time  `json:"created_at"`
-		StartedAt     *time.Time `json:"started_at"`
-		FinishedAt    *time.Time `json:"finished_at"`
+		Pool          string   `json:"pool"`
+		QueuePosition int      `json:"queue_position"`
+		SDKVersion    string   `json:"sdk_version"`
+		EnvNames      []string `json:"env_names"`
+		// Params are the values the run used for its declared parameters.
+		Params   map[string]string `json:"params"`
+		KeyID    string            `json:"key_id"`
+		ExitCode *int              `json:"exit_code"`
+		Error    *string           `json:"error"`
+		Output   *string           `json:"output"`
+		// Warnings: what the lint found, file:line: message per line.
+		Warnings     *string    `json:"warnings"`
+		LogBytes     int        `json:"log_bytes"`
+		LogTruncated bool       `json:"log_truncated"`
+		CreatedAt    time.Time  `json:"created_at"`
+		StartedAt    *time.Time `json:"started_at"`
+		FinishedAt   *time.Time `json:"finished_at"`
 	}
 	workspaceLog struct {
 		Offset    int    `json:"offset"`
@@ -111,10 +119,15 @@ const (
 func wsPath(id string) string  { return "/api/v1/dev/workspaces/" + url.PathEscape(id) }
 func runPath(id string) string { return "/api/v1/dev/runs/" + url.PathEscape(id) }
 
-// waitArg reads the wait argument (seconds), capped at maxWait.
-func waitArg(req mcp.CallToolRequest, def time.Duration) time.Duration {
+// waitArg reads the wait argument (seconds), capped at maxWait and the
+// server's own WaitCap.
+func (d Deps) waitArg(req mcp.CallToolRequest, def time.Duration) time.Duration {
+	limit := maxWait
+	if d.WaitCap > 0 {
+		limit = min(limit, d.WaitCap)
+	}
 	w := time.Duration(req.GetInt("wait", int(def/time.Second))) * time.Second
-	return min(max(w, 0), maxWait)
+	return min(max(w, 0), limit)
 }
 
 func addWorkspaceCreate(s *server.MCPServer, d Deps) {
@@ -397,7 +410,7 @@ func addWorkspaceBuild(s *server.MCPServer, d Deps) {
 		if err != nil {
 			return toolErr(err), nil
 		}
-		return d.startRun(ctx, "workspace_build", id, map[string]any{"kind": "build"}, waitArg(req, defaultBuildWait))
+		return d.startRun(ctx, "workspace_build", id, map[string]any{"kind": "build"}, d.waitArg(req, defaultBuildWait))
 	})
 }
 
@@ -408,7 +421,7 @@ func addWorkspaceRun(s *server.MCPServer, d Deps) {
 			"`env` sets your own variables (upper-case names, not KDRAIGO_*), e.g. {\"STRATEGY_RISK\":\"0.02\"}."),
 		mcp.WithString("workspace_id", mcp.Required(), mcp.Description("Workspace UUID")),
 		mcp.WithObject("env", mcp.Description("Environment variables for the strategy, name → value")),
-		mcp.WithNumber("wait", mcp.Description("Seconds to wait for the run to end, at most 170"), mcp.DefaultNumber(defaultRunWait.Seconds())),
+		mcp.WithNumber("wait", mcp.Description("Seconds to wait for the run to end, at most 170 (60 on the hosted server)"), mcp.DefaultNumber(defaultRunWait.Seconds())),
 		additive(false),
 	)
 	addTimeout(s, tool, heavyTimeout, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -424,7 +437,7 @@ func addWorkspaceRun(s *server.MCPServer, d Deps) {
 		if len(env) > 0 {
 			body["env"] = env
 		}
-		return d.startRun(ctx, "workspace_run", id, body, waitArg(req, defaultRunWait))
+		return d.startRun(ctx, "workspace_run", id, body, d.waitArg(req, defaultRunWait))
 	})
 }
 
@@ -455,12 +468,41 @@ func envArg(req mcp.CallToolRequest) (map[string]string, error) {
 }
 
 // startRun starts a build or run and reports it once it ends or wait passes.
+// A start refused because the account's run is already going in this
+// workspace (a retry after a cut call, most often) follows that run instead.
 func (d Deps) startRun(ctx context.Context, name, workspaceID string, body map[string]any, wait time.Duration) (*mcp.CallToolResult, error) {
+	resp, status, err := d.HTTP.Do(ctx, true, client.HeaderStyleStandard, http.MethodPost, client.Workspace, wsPath(workspaceID)+"/runs", nil, body)
+	if err != nil {
+		return toolErr(fmt.Errorf("%s: %w", name, err)), nil
+	}
+	if status == http.StatusTooManyRequests && strings.Contains(string(resp), "at a time") {
+		if run, ok := d.activeRun(ctx, name, workspaceID); ok {
+			run.AlreadyRunning = true
+			return d.reportRun(ctx, name, run, wait)
+		}
+	}
+	if status < 200 || status >= 300 {
+		return toolErr(httpErr(name, status, resp)), nil
+	}
 	var run workspaceRun
-	if err := d.sendJSON(ctx, name, http.MethodPost, client.Workspace, wsPath(workspaceID)+"/runs", body, &run); err != nil {
-		return toolErr(err), nil
+	if err := json.Unmarshal(resp, &run); err != nil {
+		return toolErr(fmt.Errorf("%s: decode response: %w", name, err)), nil
 	}
 	return d.reportRun(ctx, name, run, wait)
+}
+
+// activeRun is the workspace's newest run still going, if any.
+func (d Deps) activeRun(ctx context.Context, name, workspaceID string) (workspaceRun, bool) {
+	var runs []workspaceRun
+	if err := d.getJSON(ctx, name, client.Workspace, wsPath(workspaceID)+"/runs", url.Values{"limit": {"5"}}, &runs); err != nil {
+		return workspaceRun{}, false
+	}
+	for _, r := range runs {
+		if r.Active {
+			return r, true
+		}
+	}
+	return workspaceRun{}, false
 }
 
 // reportRun waits for run (up to wait) and renders where it got to.
@@ -521,6 +563,21 @@ func renderRunHead(doc *render.Doc, r *workspaceRun) {
 		head += fmt.Sprintf(", %s", r.FinishedAt.Sub(*r.StartedAt).Round(100*time.Millisecond))
 	}
 	doc.Line("%s.", head)
+	if r.AlreadyRunning {
+		doc.Line("Already going: this %s was started before (the same start again, or the account's one run at a time), so it is followed rather than a second one started.", r.Kind)
+	}
+	if len(r.Params) > 0 {
+		names := make([]string, 0, len(r.Params))
+		for n := range r.Params {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		parts := make([]string, len(names))
+		for i, n := range names {
+			parts[i] = n + "=" + r.Params[n]
+		}
+		doc.Line("Parameters: %s.", strings.Join(parts, " "))
+	}
 	if len(r.EnvNames) > 0 {
 		doc.Line("Variables given: %s.", strings.Join(r.EnvNames, ", "))
 	}
@@ -530,10 +587,14 @@ func renderRunHead(doc *render.Doc, r *workspaceRun) {
 	if r.Output != nil && strings.TrimSpace(*r.Output) != "" {
 		what := "Build output"
 		if r.Status == "refused" {
-			what = "Refused by the import check"
+			what = "Refused before any machine started (import check, parameters, backtest settings)"
 		}
 		doc.Line("%s:", what)
 		doc.Line("```text\n%s\n```", strings.TrimRight(*r.Output, "\n"))
+	}
+	if r.Warnings != nil && strings.TrimSpace(*r.Warnings) != "" {
+		doc.Line("Warnings (the run goes ahead; each says what to change):")
+		doc.Line("```text\n%s\n```", strings.TrimRight(*r.Warnings, "\n"))
 	}
 }
 
@@ -604,7 +665,7 @@ func addWorkspaceRunStatus(s *server.MCPServer, d Deps) {
 	tool := mcp.NewTool("workspace_run_status",
 		mcp.WithDescription("Where a build or run is: status, exit code, error, its backtest sessions and the last lines of its output. `wait` follows a run still going for up to that many seconds."),
 		mcp.WithString("run_id", mcp.Required(), mcp.Description("Run UUID")),
-		mcp.WithNumber("wait", mcp.Description("Seconds to wait for the run to end, at most 170"), mcp.DefaultNumber(0)),
+		mcp.WithNumber("wait", mcp.Description("Seconds to wait for the run to end, at most 170 (60 on the hosted server)"), mcp.DefaultNumber(0)),
 		readOnly(),
 	)
 	addTimeout(s, tool, heavyTimeout, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -616,7 +677,7 @@ func addWorkspaceRunStatus(s *server.MCPServer, d Deps) {
 		if err := d.getJSON(ctx, "workspace_run_status", client.Workspace, runPath(id), nil, &run); err != nil {
 			return toolErr(err), nil
 		}
-		return d.reportRun(ctx, "workspace_run_status", run, waitArg(req, 0))
+		return d.reportRun(ctx, "workspace_run_status", run, d.waitArg(req, 0))
 	})
 }
 

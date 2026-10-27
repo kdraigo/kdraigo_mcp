@@ -13,6 +13,10 @@ import (
 // Deps is the set of dependencies passed to every tool's Register function.
 type Deps struct {
 	HTTP *client.HTTP
+	// WaitCap caps how long one tool call waits for a build or run; 0 is
+	// maxWait. The hosted server waits less: a call held for minutes is
+	// what an AI app's connector is likeliest to cut.
+	WaitCap time.Duration
 }
 
 func toolErr(err error) *mcp.CallToolResult {

@@ -59,8 +59,30 @@ Key types you will touch:
   - **`ReduceOnly`** (dev_sdk ≥ v1.2.13) is true for an order that can only shrink a position (a stop loss, a take profit, a closing order). Set on live Binance futures, including a stop that has fired; false on spot and in backtests. Live telemetry also sends it and the stop price, so the platform can show a resting stop and tell an exit from an entry.
 - `types.OrderRequest` — what you pass to `ctx.PlaceOrder`. Includes `StopPrice` (trigger for stop orders), `ReduceOnly` (futures only — see the perpetual futures section) plus `Reason` (`map[string]any`) and `Logs` (`[]string`) for telemetry.
 - `types.Position` — returned by `s.GetPositions`; futures only. See the perpetual futures section.
+- `types.Account` — returned by `s.GetAccount(ctx, exchange, asset)` (on the SDK, not on `ctx`): `Balances []types.Balance`, each `Asset`, `Free`, `Lock`. Pick the entry by `Asset`; never take `Balances[0]`.
+  - **Spot:** one entry per asset; `Free` is spendable, `Lock` is held by resting orders.
+  - **Futures backtest:** the collateral entry (`USDT`): `Free` is the cash not posted as margin, `Lock` the margin posted in open positions. Plus one entry per open position: `Asset` is the base (`BTC`), `Free` the signed size (negative = short), `Lock` its isolated margin.
+  - **Live Binance futures:** collateral entries only (`Free` = the venue's available balance, `Lock` = wallet − available); read positions with `GetPositions`.
+  - In backtests `asset` picks the wallet and every entry of it comes back; live, `asset` filters the entries (empty = all). `Account.Exchange` is empty in backtests.
+  - Margin available after unrealized P&L is not exposed yet.
+
+  ```go
+  acc, err := s.GetAccount(ctx.Ctx, "binance_futures", "USDT")
+  if err != nil {
+      return
+  }
+  var free float64 // cash you can still post as margin
+  for _, b := range acc.Balances {
+      if b.Asset == "USDT" {
+          free = b.Free
+      }
+  }
+  ```
+
 - `types.Context` — provided to every callback; exposes `PlaceOrder`, `CancelOrder`, `Now`, `GetIndicator`, the `Config`, and the `Trader` (paper or live).
-- `types.Timeframe` — string-backed; constants `Timeframe1m`, `Timeframe3m`, `Timeframe5m`, `Timeframe15m`, `Timeframe30m`, `Timeframe1h`, `Timeframe2h`, `Timeframe4h`, `Timeframe1d`.
+- `types.Timeframe` — string-backed; constants `Timeframe1m`, `Timeframe2m`, `Timeframe3m`, `Timeframe5m`, `Timeframe15m`, `Timeframe30m`, `Timeframe1h`, `Timeframe2h`, `Timeframe4h`, `Timeframe1d`, `Timeframe1w`, `Timeframe1M`.
+  - `1w` weeks start Monday 00:00 UTC; `1M` is the calendar month (case matters: `1M` is a month, `1m` a minute).
+  - Start a weekly or monthly run on a boundary (a Monday, the 1st): a run starting mid-week gets a partial first bar, labelled as a full one.
   All of these are now genuinely aggregated server-side. Previously `3m`, `30m` and `2h` were
   accepted but silently served as **1-minute** data, so any strategy calibrated on them before
   2026-08 was computing on the wrong bars. An unsupported timeframe is now a hard error rather
@@ -618,6 +640,36 @@ s.SetOnCandleFor(types.Timeframe1h, func(ctx *types.Context, c *types.Candle) {
 
 Limits: 32 plots and 8 panels per session, 8 levels per plot, marker text 32 characters. Plot storage per session is 8 MB basic / 64 MB verified / 256 MB admin (about 16 bytes a value: 500,000 values on basic). Past it a **backtest** keeps running, one response carries a `warning`, and later values are not stored; a **live** session keeps its newest values and drops its oldest (the warning is logged by the SDK once).
 
+## parameters
+
+Declare every setting a user might change with `github.com/kdraigo/dev_sdk/params` (dev_sdk v1.7.0 or later): tunable numbers, the pairs, the capital and the backtest window. Each is read from the environment by its name, with a default. In the cloud workspace the website reads the declarations from the code and shows them as a form, so the user can run the backtest again with other values without you and without a code change. Each run keeps the values it used (`workspace_run_status` shows them).
+
+```go
+var (
+    fast  = params.Int("FAST_PERIOD", 50, params.Range(5, 500), params.Help("fast EMA period"))
+    risk  = params.Float("RISK_PER_TRADE", 0.01, params.Range(0.001, 0.05))
+    side  = params.Choice("SIDE", "long", []string{"long", "short", "both"})
+    pairs = params.List("PAIRS", "BTC/USDT,ETH/USDT")
+    start = params.Date("BT_START", "today-30d") // YYYY-MM-DD, today or today-<days>d (UTC)
+    end   = params.Date("BT_END", "today")
+    hold  = params.Duration("HOLD", "4h")
+    on    = params.Bool("LONG_ONLY", true)
+)
+
+func main() {
+    params.Log() // "params: BT_END=today FAST_PERIOD=50 …" in the run's output
+    // …
+}
+```
+
+**Rules:**
+- **Literals only.** The name, the default and every option are written in the call itself: `params.Int("FAST", 50)`, never a variable or a computed value. The platform reads them without running the code; a declaration it cannot read refuses the run, naming the line.
+- **Names:** upper-case letters, digits and `_`, at most 64; never `KDRAIGO_` (the platform's). Declare each name once.
+- **A bad value stops the program** at once with a message naming the parameter. In the cloud workspace a value outside its type, range or choices is refused before the run starts.
+- **Declare them as package-level `var`s** (above) or at the top of `main`, not inside callbacks.
+
+`workspace_params` lists a workspace's declarations; `workspace_run`'s `env` sets them by name. The starter templates (on dev_sdk v1.7.0) declare `EXCHANGE`, `PAIR`, `CAPITAL`, `BT_START`, `BT_END` and their strategy's own settings. Keep those names when you adapt a starter: they are what the website shows first, and what the platform checks a run's backtest by before a machine starts (see "Checks before a machine starts" under cloud workspace).
+
 ## cloud workspace
 
 The cloud workspace builds and runs a strategy on the platform, so nothing is needed locally: no Go, no checkout, no keys. The `workspace_*` tools drive it. The same program runs as it would with `go run .`; only where it runs changes.
@@ -649,6 +701,19 @@ The cloud workspace builds and runs a strategy on the platform, so nothing is ne
   - Types, durations, dates and `Time` methods (`time.Date`, `time.Unix`, `time.Parse`, `time.Hour`, `t.Add`, `t.Sub`, …) stay.
 - **When it's checked:** at build time, and a refused build lists every problem as `file:line: message`.
 
+**Checks before a machine starts.** Every build and run is read first, which takes no machine time:
+- **Refusals.** The run is recorded as `refused`, with every problem as `file:line: message`. Causes:
+  - the import rules above;
+  - a parameter declaration the platform cannot read, or a value outside its declaration;
+  - for a run, the declared backtest: a pair with no data on the exchange, a `BT_START` before the data (`get_data_coverage`), a `BT_END` not after `BT_START`, or more pairs or bars per pair than the account backtests.
+  - The backtest is read from the parameters `EXCHANGE`, `PAIR` or `PAIRS`, `BT_START` and `BT_END`, and from the shortest timeframe in `Timeframes` when it's written as constants. A strategy that declares none of them isn't checked here; the engine still refuses the same things when the session opens.
+- **Warnings.** The run goes ahead, and `workspace_run` and `workspace_run_status` show them. Causes:
+  - `math/rand`'s global functions or `crypto/rand`: two runs of the same code differ, so seed a generator from a `SEED` parameter;
+  - a `go` statement outside `func main`: the replay doesn't wait for a goroutine;
+  - an `OrderRequest` without a `Reason`;
+  - orders with no stop anywhere: no stop order type, no `StopPrice`, no `PlaceBracket`;
+  - a declared parameter that nothing reads.
+
 **How a run goes.**
 1. `workspace_build` (or the build inside `workspace_run`) compiles offline on a sandbox machine. A machine that has to start takes about 40 s; later builds take seconds.
    - **Admin accounts** (and paid ones, later) get a machine of their own.
@@ -677,6 +742,11 @@ The cloud workspace builds and runs a strategy on the platform, so nothing is ne
 | Workspaces | — | 3 | 10 | 50 |
 | Time per run | — | 1 h | 1 h | 12 h |
 | Machine | — | shared, queued | shared, queued | own |
+| Backtest sessions at once | 1 | 1 | 3 | 20 |
+| Pairs per backtest | 2 | 2 | 5 | no cap |
+| Bars per pair | 50,000 | 50,000 | 150,000 | no cap |
+
+A run's backtest is one of the account's sessions, wherever it was started from. A Google sign-in adds the workspace allowance; its backtests stay basic. Basic accounts also share a pool of 4 running sessions among them all. Bars are counted at the stream's timeframe: 50,000 is about 35 days of 1m or 5.7 years of 1h.
 
 Linking Telegram on the website's Account page makes an account verified. An account's newest 50 runs keep their source and output (`workspace_logs`); older runs keep only their record, and records go after 30 days.
 
@@ -689,6 +759,7 @@ What an account may use depends on its tier. **basic** is a Google account or a 
 | Per account or session | basic | verified | admin | When reached |
 |---|---|---|---|---|
 | Storage of finished sessions | 50 MB | 512 MB | no account cap | Create returns 403, code `storage_quota_exceeded`: delete old sessions (retrying does not help) |
+| A window starting before its market's first bar (or a market with no history on that exchange) | — | — | — | Create returns 400, code `no_data`, naming the first date. `get_data_coverage` lists every market's first and last bar; binance spot starts later than binance_futures |
 | Sessions at once (running, or waiting to be resumed) | 1 | 3 | 20 | Create returns 429, code `too_many_sessions`, naming the sessions that hold the slots: let one finish or end it with `close_session` |
 | Pairs per session (`Assets` × `RequestedExchanges`) | 2 | 5 | no cap | Create returns 403, code `backtest_too_large`: split the pairs over several sessions |
 | Period per session, in bars of its smallest timeframe, per pair | 50,000 (about 34 days of 1m, 5.7 years of 1h) | 150,000 (about 104 days of 1m, 17.1 years of 1h) | no cap | Create returns 403, code `backtest_too_large`: shorten `StartTime`–`EndTime` or use a longer timeframe |

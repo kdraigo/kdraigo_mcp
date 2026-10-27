@@ -2,6 +2,7 @@ package tools
 
 import (
 	"os"
+	"time"
 
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -14,11 +15,18 @@ import (
 // for up to an hour.
 const ReplayEnv = "KDRAIGO_MCP_ENABLE_REPLAY"
 
+// HostedWaitCap is the longest a hosted tool call waits for a build or run;
+// workspace_run_status follows it from there.
+const HostedWaitCap = 60 * time.Second
+
 // Register adds every tool.
 // RegisterHosted adds what the hosted server (kdraigo-mcp serve) offers: the
 // same tools less those that touch the caller's own disk (scaffold_strategy)
 // and the candle replay.
 func RegisterHosted(s *server.MCPServer, d Deps) {
+	if d.WaitCap == 0 {
+		d.WaitCap = HostedWaitCap
+	}
 	RegisterDocs(s)
 	RegisterSessions(s, d)
 	RegisterAnalytics(s, d)

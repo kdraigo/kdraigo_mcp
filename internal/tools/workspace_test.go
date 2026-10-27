@@ -100,13 +100,16 @@ func TestWorkspaceBuild_RefusedShowsTheProblems(t *testing.T) {
 			assert.JSONEq(t, `{"kind":"build"}`, string(body))
 			w.WriteHeader(http.StatusCreated)
 			jsonReply(map[string]any{"id": runID, "kind": "build", "status": "refused", "active": false, "exit_code": -1,
-				"output": "x.go:2: import \"os/exec\": starting processes is not available in the cloud workspace"})(w, r)
+				"output":   "x.go:2: import \"os/exec\": starting processes is not available in the cloud workspace",
+				"warnings": "x.go:9: go statement: the replay does not wait for a goroutine"})(w, r)
 		},
 	})
 	out, isErr := call(t, s, "workspace_build", map[string]any{"workspace_id": wsID})
 	require.False(t, isErr, out)
-	assert.Contains(t, out, "Refused by the import check")
+	assert.Contains(t, out, "Refused before any machine started")
 	assert.Contains(t, out, `x.go:2: import "os/exec"`)
+	assert.Contains(t, out, "Warnings (the run goes ahead")
+	assert.Contains(t, out, "x.go:9: go statement")
 	assert.Contains(t, out, "Fix the files")
 }
 
@@ -291,4 +294,75 @@ func TestWorkspaceFiles_ShowVersionAndWriter(t *testing.T) {
 	assert.Contains(t, out, "version")
 	assert.Contains(t, out, "the Lab")
 	assert.Contains(t, out, "API")
+}
+
+// A start the service matched to a run already going (a retry) says so.
+func TestWorkspaceRun_AlreadyRunning(t *testing.T) {
+	s := backend(t, map[string]http.HandlerFunc{
+		wsRoute("/workspaces/" + wsID + "/runs"): func(w http.ResponseWriter, r *http.Request) {
+			jsonReply(map[string]any{"id": runID, "kind": "run", "status": "running", "active": true, "already_running": true})(w, r)
+		},
+		wsRoute("/runs/" + runID):           jsonReply(map[string]any{"id": runID, "kind": "run", "status": "running", "active": true}),
+		"/frontend-api/api/v1/dev/sessions": jsonReply([]any{}),
+	})
+	out, isErr := call(t, s, "workspace_run", map[string]any{"workspace_id": wsID, "wait": 0})
+	require.False(t, isErr, out)
+	assert.Contains(t, out, "Already going: this run was started before")
+}
+
+// Refused because the workspace's run is already going (one at a time), the
+// start follows that run instead of failing.
+func TestWorkspaceRun_RefusedFollowsTheRunGoing(t *testing.T) {
+	s := backend(t, map[string]http.HandlerFunc{
+		wsRoute("/workspaces/" + wsID + "/runs"): func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodPost {
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write([]byte(`{"error":"limit reached: 1 run(s) at a time on your account; wait for one to end or stop it"}`))
+				return
+			}
+			jsonReply([]any{
+				map[string]any{"id": runID, "kind": "run", "status": "running", "active": true},
+			})(w, r)
+		},
+		wsRoute("/runs/" + runID):           jsonReply(map[string]any{"id": runID, "kind": "run", "status": "running", "active": true}),
+		"/frontend-api/api/v1/dev/sessions": jsonReply([]any{}),
+	})
+	out, isErr := call(t, s, "workspace_run", map[string]any{"workspace_id": wsID, "wait": 0})
+	require.False(t, isErr, out)
+	assert.Contains(t, out, "Run "+runID+": running")
+	assert.Contains(t, out, "Already going")
+}
+
+// The hosted server holds a call for at most HostedWaitCap.
+func TestWaitArg_HostedCap(t *testing.T) {
+	req := mcp.CallToolRequest{}
+	req.Params.Arguments = map[string]any{"wait": 170}
+	assert.Equal(t, 170*time.Second, Deps{}.waitArg(req, defaultRunWait))
+	assert.Equal(t, HostedWaitCap, Deps{WaitCap: HostedWaitCap}.waitArg(req, defaultRunWait))
+	req.Params.Arguments = map[string]any{}
+	assert.Equal(t, HostedWaitCap, Deps{WaitCap: HostedWaitCap}.waitArg(req, defaultRunWait), "the default too")
+}
+
+// The declared parameters, as a table; problems listed; a run shows the
+// values it used.
+func TestWorkspaceParams(t *testing.T) {
+	s := backend(t, map[string]http.HandlerFunc{
+		wsRoute("/workspaces/" + wsID + "/params"): jsonReply(map[string]any{
+			"params": []any{
+				map[string]any{"name": "FAST_PERIOD", "kind": "int", "default": "50", "min": 5, "max": 500, "help": "fast EMA period", "file": "main.go", "line": 8},
+				map[string]any{"name": "SIDE", "kind": "choice", "default": "long", "choices": []string{"long", "short"}, "file": "main.go", "line": 9},
+			},
+			"problems": []any{map[string]any{"file": "x.go", "line": 3, "msg": "params.Int: the name, default and options must be literals"}},
+		}),
+		wsRoute("/runs/" + runID): jsonReply(map[string]any{"id": runID, "kind": "run", "status": "succeeded", "active": false,
+			"params": map[string]string{"SIDE": "long", "FAST_PERIOD": "21"}}),
+	})
+	out, isErr := call(t, s, "workspace_params", map[string]any{"workspace_id": wsID})
+	require.False(t, isErr, out)
+	assert.Contains(t, out, "FAST_PERIOD\tint\t50\t5..500\tfast EMA period\tmain.go:8")
+	assert.Contains(t, out, "SIDE\tchoice\tlong\tlong | short")
+	assert.Contains(t, out, "- x.go:3: params.Int")
+
+	out, _ = call(t, s, "workspace_run_status", map[string]any{"run_id": runID})
+	assert.Contains(t, out, "Parameters: FAST_PERIOD=21 SIDE=long.")
 }

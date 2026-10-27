@@ -11,8 +11,10 @@ import (
 	"github.com/kdraigo/kdraigo_mcp/internal/client"
 )
 
-// RegisterCandles adds get_candles, calling the unauthenticated data_provider /api/v1/candles.
+// RegisterCandles adds get_candles and get_data_coverage, calling the
+// unauthenticated data_provider /api/v1/candles and /api/v1/metadata.
 func RegisterCandles(s *server.MCPServer, d Deps) {
+	addDataCoverage(s, d)
 	tool := mcp.NewTool("get_candles",
 		mcp.WithDescription("Fetch OHLCV candles from data_provider. Public endpoint, no auth required. At most 50,000 bars per call (about a month of 1m): for longer ranges, use a larger timeframe or split the range into several calls."),
 		mcp.WithString("exchange", mcp.Required(), mcp.Description("Exchange ID, e.g. binance or bybit")),

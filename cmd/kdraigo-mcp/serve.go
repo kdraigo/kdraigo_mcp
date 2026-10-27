@@ -70,7 +70,9 @@ func serve(args []string) error {
 		return err
 	case <-ctx.Done():
 	}
-	shutdown, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// In-flight calls finish first: a workspace_run holds one for up to
+	// tools.HostedWaitCap, and one cut by a redeploy reads as a failure.
+	shutdown, cancel := context.WithTimeout(context.Background(), tools.HostedWaitCap+30*time.Second)
 	defer cancel()
 	return srv.Shutdown(shutdown)
 }
