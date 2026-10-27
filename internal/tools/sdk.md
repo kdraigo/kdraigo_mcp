@@ -188,6 +188,10 @@ take-profit, say — the **fill policy** decides which fills first. It defaults 
 cancelling pair** sharing one fund reservation: when either fills, the other is
 cancelled, and both legs are persisted so the outcome is auditable.
 
+`PlaceBracket` returns both legs. Tell them apart by the stop: its type is `STOP_LOSS` or
+`STOP_LOSS_LIMIT`. The take-profit's type differs between venues (`LIMIT_MAKER` in backtests), so
+don't match it by type. Keep both IDs, so that an order update for either leg books the exit.
+
 It is a *pair*, not a ladder. The paper wallet reserves funds per order, so several
 independent take-profits against one position cannot rest simultaneously — the second
 returns `INSUFFICIENT_FUNDS`. A strategy that wants a laddered exit should place
