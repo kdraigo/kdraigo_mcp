@@ -166,13 +166,35 @@ type orderBreakdown struct {
 	Other       orderTally `json:"other"`
 }
 
+// openBlock is what was still open when the run stopped (report version 3):
+// left out of every figure, valued at the instruments' last close.
+type openBlock struct {
+	Positions []openPosition `json:"positions"`
+	// Unrealized is nil when any position has no price.
+	Unrealized *float64 `json:"unrealized"`
+	Realized   float64  `json:"realized"`
+	Fees       float64  `json:"fees"`
+	Funding    float64  `json:"funding"`
+}
+
 type openPosition struct {
-	Side                 string     `json:"side"`
-	Qty                  float64    `json:"qty"`
-	AvgEntry             float64    `json:"avg_entry"`
-	OpenedAt             *time.Time `json:"opened_at"`
-	LastFillPrice        float64    `json:"last_fill_price"`
-	UnrealizedAtLastFill float64    `json:"unrealized_at_last_fill"`
+	Exchange string     `json:"exchange"`
+	Pair     string     `json:"pair"`
+	Side     string     `json:"side"`
+	Qty      float64    `json:"qty"`
+	AvgEntry float64    `json:"avg_entry"`
+	OpenedAt *time.Time `json:"opened_at"`
+	// MarkPrice is the last close the engine recorded at the end, nil
+	// before it did; Unrealized is the position's value change at it.
+	MarkPrice  *float64   `json:"mark_price"`
+	MarkAt     *time.Time `json:"mark_at"`
+	Unrealized *float64   `json:"unrealized"`
+	Realized   float64    `json:"realized"`
+	Fees       float64    `json:"fees"`
+	Funding    float64    `json:"funding"`
+
+	// lookedUp: the price came from market data here, the engine had none.
+	lookedUp bool
 }
 
 type stats struct {
@@ -201,16 +223,15 @@ type stats struct {
 	ShortWins      int            `json:"short_wins"`
 	Liquidations   int            `json:"liquidations"`
 	OpenAtEnd      int            `json:"open_at_end"`
-	OpenPosition   *openPosition  `json:"open_position"`
 	Orders         orderBreakdown `json:"orders"`
 
+	// Report version 3: nil when everything closed.
+	Open *openBlock `json:"open"`
+
 	// Report version 2.
-	OpenAtEndPnL          float64   `json:"open_at_end_pnl"`
-	OpenAtEndShare        *float64  `json:"open_at_end_share"`
 	ClosedAtEnd           int       `json:"closed_at_end"`
 	ReturnToDD            *float64  `json:"return_to_dd"`
 	Expectancy            *float64  `json:"expectancy"`
-	PFInclOpen            *float64  `json:"pf_incl_open"`
 	AvgR                  *float64  `json:"avg_r"`
 	RSE                   *float64  `json:"r_se"`
 	SumR                  *float64  `json:"sum_r"`
@@ -293,6 +314,7 @@ type trade struct {
 	ExitKind     string     `json:"exit_kind"`
 	Liquidated   bool       `json:"liquidated"`
 	OpenAtEnd    bool       `json:"open_at_end"`
+	Unrealized   *float64   `json:"unrealized"`
 	ClosedAtEnd  bool       `json:"closed_at_end"`
 	Inherited    bool       `json:"inherited"`
 	Reconciled   *bool      `json:"reconciled"`

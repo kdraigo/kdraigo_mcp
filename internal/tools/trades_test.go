@@ -87,7 +87,7 @@ func TestTradesSaveTo(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
 	require.Len(t, lines, 1501)
 	assert.Equal(t, strings.Join(tradeCSVHeader, ","), lines[0])
-	assert.Equal(t, "1,binance_futures,BTC/USDT,long,2026-01-01T00:00:00Z,2026-01-01T01:00:00Z,3600,100,110,1,2,1,0,10,0.2,0.1,9.7,95,,5,1.94,,stop_order,take_profit,false,false,false,false,true,,", lines[1])
+	assert.Equal(t, "1,binance_futures,BTC/USDT,long,2026-01-01T00:00:00Z,2026-01-01T01:00:00Z,3600,100,110,1,2,1,0,10,0.2,0.1,9.7,95,,5,1.94,,stop_order,take_profit,false,false,false,false,true,,,", lines[1])
 }
 
 func TestBreakdownTable(t *testing.T) {

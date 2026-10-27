@@ -33,7 +33,7 @@ func addGetTrades(s *server.MCPServer, d Deps) {
 		mcp.WithDescription("A session's trades, one row each: a futures position from open to close, or a spot position flat to flat. "+
 			"Each has entry and exit time and price, size, adds and partial exits, gross, fees, funding and net, how it exited, its initial stop and its result in R (net over the risk to the initial stop). "+
 			"The initial stop is the first protective STOP_LOSS placed with or after the entry, or else the numeric `stop` in the entry order's reason; trades without one have no R. "+
-			"Flags: open (still open at the end, valued at its last fill), end (closed by a market or limit order in the run's last bar), liq (liquidated), unrec (the fills disagree with the engine's position record), inh (began as a starting balance). "+
+			"Flags: open (still open at the end and in no statistic: its net is only what partial closes made and what it cost so far; its unrealized P&L at the last close is shown with the flag), end (closed by a market or limit order in the run's last bar), liq (liquidated), unrec (the fills disagree with the engine's position record), inh (began as a starting balance). "+
 			"Sort by net or net_r to find the trades that made or broke the result; save_to writes every matching trade with all fields to a local CSV."),
 		mcp.WithString("session_id", mcp.Required(), mcp.Description("Session UUID")),
 		mcp.WithString("session_type", mcp.Description("Session type"), mcp.DefaultString("backtest"), mcp.Enum("backtest", "live")),
@@ -144,7 +144,13 @@ func renderTrades(p *tradesPage, sortBy string) string {
 func flags(t *trade) string {
 	var f []string
 	if t.OpenAtEnd {
-		f = append(f, "open")
+		// Still open: its net is only what partial closes made and what it
+		// cost so far; its value at the last close is apart.
+		if t.Unrealized != nil {
+			f = append(f, "open(unreal "+render.Signed(*t.Unrealized, 2)+")")
+		} else {
+			f = append(f, "open")
+		}
 	}
 	if t.ClosedAtEnd {
 		f = append(f, "end")
@@ -165,6 +171,7 @@ var tradeCSVHeader = []string{
 	"id", "exchange", "pair", "side", "entry_at", "exit_at", "hold_sec", "entry_px", "exit_px", "qty_entry", "qty_peak",
 	"adds", "partials", "gross", "fees", "funding", "net", "stop_px", "final_stop_px", "risk", "net_r", "gross_r", "r_source",
 	"exit_kind", "liquidated", "open_at_end", "closed_at_end", "inherited", "reconciled", "entry_order_id", "exit_order_id",
+	"unrealized",
 }
 
 // saveTrades writes every matching trade to a CSV at path, a page at a time.
@@ -235,6 +242,7 @@ func tradeCSVRow(t *trade) []string {
 		f(t.Gross), f(t.Fees), f(t.Funding), f(t.Net), opt(t.StopPx), opt(t.FinalStopPx), opt(t.Risk), opt(t.NetR), opt(t.GrossR), t.RSource,
 		t.ExitKind, strconv.FormatBool(t.Liquidated), strconv.FormatBool(t.OpenAtEnd), strconv.FormatBool(t.ClosedAtEnd),
 		strconv.FormatBool(t.Inherited), reconciled, t.EntryOrderID, t.ExitOrderID,
+		opt(t.Unrealized),
 	}
 }
 

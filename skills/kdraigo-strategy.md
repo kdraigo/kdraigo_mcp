@@ -57,7 +57,7 @@ Capture that id; every result tool takes it. The window, instruments, wallets an
 - **Fat tails.** The report gives net without the 5 best trades. If that is negative, the result is a handful of trades; `get_trades sort=net` shows which.
 - **R multiples.** The report's average R (net over the risk to the initial stop) comes with its standard error. An average under two standard errors from zero is not an edge yet. R needs an initial stop on every trade: if the report says R covers few trades, add the stop (see below) before judging per-trade quality.
 - **Daily ratios.** Sharpe, Sortino and Calmar come from daily closed-trade equity, so they understate volatility inside trades. Use them to rank variants on the same window, not as absolute claims.
-- **Open at end.** Positions still open at the end are valued at their last fill. If they are a big share of the result, the result is unfinished.
+- **Open at end.** Every figure is closed trades only; positions still open at the end are listed apart with their unrealized P&L at the last close. If that is large against the result, the result is unfinished: say so rather than adding the two.
 
 ## Pitfalls
 

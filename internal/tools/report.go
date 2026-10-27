@@ -21,12 +21,12 @@ import (
 func addGetSessionReport(s *server.MCPServer, d Deps) {
 	tool := mcp.NewTool("get_session_report",
 		mcp.WithDescription("The results of a backtest or live session in one call. Start every evaluation here. "+
-			"Header: starting capital to final equity, return, max drawdown, return over drawdown, net P&L split into gross, fees and funding, "+
+			"Every figure is closed trades only. Header: starting capital to final equity, return, max drawdown, return over drawdown, net P&L split into gross, fees and funding, "+
 			"trades and win rate per side, profit factor, average win and loss, order outcomes. "+
+			"Positions still open at the end are listed apart, never mixed into the figures: each one's unrealized P&L at the session's last close, and the fees and funding paid on it so far. "+
 			"Then a table per instrument, P&L per calendar month (UTC) from daily closed-trade equity, "+
 			"and warnings about whatever makes the figures less trustworthy: a run that has not finished or stopped short of its window, few trades, "+
-			"positions still open at the end (valued at their last fill; a backtest's are also marked to the last close, with the final equity and return that gives), "+
-			"liquidations, a result carried by one trade or one instrument, costs that eat the edge. "+
+			"large positions still open at the end, liquidations, a result carried by one trade or one instrument, costs that eat the edge. "+
 			"P&L counts on the day a position closes; fees on the day an order fills."),
 		mcp.WithString("session_id", mcp.Required(), mcp.Description("Session UUID")),
 		mcp.WithString("session_type", mcp.Description("Session type"), mcp.DefaultString("backtest"), mcp.Enum("backtest", "live")),
@@ -59,9 +59,8 @@ type reportInputs struct {
 	detailErr error
 	days      []seriesPoint
 	daysErr   error
-	// marks are a backtest's open positions valued at the last close.
-	marks   []positionMark
-	markErr error
+	// openErr says which open positions have no price at the end.
+	openErr error
 }
 
 // seriesEpoch is earlier than any session; the server clamps a series to the
@@ -95,11 +94,13 @@ func (d Deps) fetchReport(ctx context.Context, id, kind string) *reportInputs {
 		}
 	})
 	wg.Wait()
-	if kind == "backtest" && in.perfErr == nil && in.perf.Total.OpenAtEnd > 0 {
+	// A session from before the engine recorded the last closes: look them
+	// up, so its open positions still have a value at the end.
+	if o := in.perf.Total.Open; kind == "backtest" && in.perfErr == nil && o != nil && (o.Unrealized == nil) {
 		if end, ok := markedEnd(in.detail); ok {
-			in.marks, in.markErr = d.markOpenPositions(ctx, &in.perf, end)
+			in.openErr = d.priceOpen(ctx, o, end)
 		} else {
-			in.markErr = fmt.Errorf("the session's end is unknown")
+			in.openErr = fmt.Errorf("the session's end is unknown, so open positions have no price")
 		}
 	}
 	return in
@@ -134,8 +135,8 @@ func renderReport(in *reportInputs) string {
 		doc.Line("Session %s · %s", p.SessionID, in.kind)
 	}
 
-	// Headline.
-	doc.Line("Capital %s %s → %s · return %s · max DD %s (%s) · return/DD %s",
+	// Headline: closed trades only. What is still open is reported apart.
+	doc.Line("Capital %s %s → %s on closed trades · return %s · max DD %s (%s) · return/DD %s",
 		render.Num(p.InitialCapital, 2), q, render.Num(p.FinalEquity, 2),
 		signedPct(t.ReturnPct), render.Num(t.MaxDrawdown, 2), render.OptPct(t.MaxDrawdownPct, 1), returnOverDD(t))
 	doc.Line("Net %s = gross %s − fees %s − funding %s (funding positive = paid)",
@@ -146,7 +147,7 @@ func renderReport(in *reportInputs) string {
 	doc.Line("Avg win %s · avg loss %s · best %s · worst %s · liquidations %d · open at end %d",
 		optSigned(t.AvgWin), optSigned(t.AvgLoss), optSigned(t.BestTrade), optSigned(t.WorstTrade), t.Liquidations, t.OpenAtEnd)
 	doc.Line("Orders placed/filled/canceled: %s", orderTallies(&t.Orders))
-	renderMarks(doc, in)
+	renderOpen(doc, in)
 	if p.ReportVersion >= 2 {
 		renderResearch(doc, p)
 	}
@@ -154,9 +155,6 @@ func renderReport(in *reportInputs) string {
 	warnings := reportWarnings(in)
 	if p.ReportVersion >= 2 {
 		warnings = serverWarnings(in)
-	}
-	if w := markWarning(in); w != "" {
-		warnings = append([]string{w}, warnings...)
 	}
 	if len(warnings) > 0 {
 		doc.Blank()
@@ -322,17 +320,7 @@ func reportWarnings(in *reportInputs) []string {
 	}
 
 	if t.OpenAtEnd > 0 {
-		unreal := 0.0
-		for _, s := range p.Instruments {
-			if s.OpenPosition != nil {
-				unreal += s.OpenPosition.UnrealizedAtLastFill
-			}
-		}
-		msg := fmt.Sprintf("%d position(s) open at the end, valued at their last fill: %s of the net P&L", t.OpenAtEnd, render.Signed(unreal, 2))
-		if t.NetPnL != 0 {
-			msg += fmt.Sprintf(" (%s)", render.Pct(math.Abs(unreal/t.NetPnL)*100, 0))
-		}
-		out = append(out, msg+". Where they would have closed is unknown.")
+		out = append(out, fmt.Sprintf("%d position(s) open at the end, valued at their last fill and counted in the net P&L. Where they would have closed is unknown.", t.OpenAtEnd))
 	}
 
 	if t.Liquidations > 0 {

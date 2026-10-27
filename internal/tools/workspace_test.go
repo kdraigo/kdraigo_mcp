@@ -310,6 +310,22 @@ func TestWorkspaceRun_AlreadyRunning(t *testing.T) {
 	assert.Contains(t, out, "Already going: this run was started before")
 }
 
+// It still says so after following the run to its end: the status reads
+// while waiting do not carry the flag.
+func TestWorkspaceRun_AlreadyRunningAfterWaiting(t *testing.T) {
+	s := backend(t, map[string]http.HandlerFunc{
+		wsRoute("/workspaces/" + wsID + "/runs"): func(w http.ResponseWriter, r *http.Request) {
+			jsonReply(map[string]any{"id": runID, "kind": "run", "status": "running", "active": true, "already_running": true})(w, r)
+		},
+		wsRoute("/runs/" + runID):           jsonReply(map[string]any{"id": runID, "kind": "run", "status": "succeeded", "active": false, "exit_code": 0}),
+		"/frontend-api/api/v1/dev/sessions": jsonReply([]any{}),
+	})
+	out, isErr := call(t, s, "workspace_run", map[string]any{"workspace_id": wsID, "wait": 5})
+	require.False(t, isErr, out)
+	assert.Contains(t, out, "Run "+runID+": succeeded")
+	assert.Contains(t, out, "Already going: this run was started before")
+}
+
 // Refused because the workspace's run is already going (one at a time), the
 // start follows that run instead of failing.
 func TestWorkspaceRun_RefusedFollowsTheRunGoing(t *testing.T) {

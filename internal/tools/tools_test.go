@@ -114,8 +114,7 @@ func reportFixture() performanceReport {
 			OpenAtEnd: 1, Orders: orderBreakdown{Total: orderTally{Placed: 30, Filled: 24, Canceled: 6}, StopLoss: orderTally{Placed: 9, Filled: 8, Canceled: 1}},
 		},
 		Instruments: []stats{
-			{Exchange: "binance_futures", Pair: "BTC/USDT", Model: "positions", NetPnL: 80, ReturnPct: ptr(8), Trades: 8, Wins: 4,
-				OpenAtEnd: 1, OpenPosition: &openPosition{Side: "long", Qty: 0.1, AvgEntry: 50000, LastFillPrice: 50300, UnrealizedAtLastFill: 30}},
+			{Exchange: "binance_futures", Pair: "BTC/USDT", Model: "positions", NetPnL: 80, ReturnPct: ptr(8), Trades: 8, Wins: 4, OpenAtEnd: 1},
 			{Exchange: "binance_futures", Pair: "ETH/USDT", Model: "positions", NetPnL: 20, ReturnPct: ptr(2), Trades: 4, Wins: 2},
 		},
 	}
@@ -146,28 +145,14 @@ func TestSessionReport(t *testing.T) {
 				dayPoint("2026-01-30", 1010), dayPoint("2026-01-31", 1005), dayPoint("2026-02-01", 1100),
 			}})(w, r)
 		},
-		// The open position is priced at the last close by the run's last candle.
-		"/data/api/v1/candles": func(w http.ResponseWriter, r *http.Request) {
-			q := r.URL.Query()
-			assert.Equal(t, "binance_futures", q.Get("exchange"))
-			assert.Equal(t, "BTC/USDT", q.Get("symbol"))
-			assert.Equal(t, "1m", q.Get("timeframe"))
-			assert.Equal(t, strconv.FormatInt(last.UnixMilli(), 10), q.Get("to"))
-			jsonReply([]map[string]any{
-				{"close": 50700.0, "close_time": last.Add(-time.Minute).UnixMilli()},
-				{"close": 50800.0, "close_time": last.UnixMilli() - 1},
-			})(w, r)
-		},
 	})
 	out, isErr := call(t, s, "get_session_report", map[string]any{"session_id": sid})
 	require.False(t, isErr, out)
-	assert.Contains(t, out, "Marked to the last close (open positions at the market, not their last fill): final equity 1150.00 · return +15.00% · +50.00 against the headline")
-	assert.Contains(t, out, "binance_futures\tBTC/USDT\tlong\t0.100000\t50000.0000\t50300.0000\t50800.0000\t2026-02-01 11:59\t+30.00\t+80.00")
-	assert.Contains(t, out, "- Open positions are worth 50.00 more at the last close than at their last fill: the headline final equity and return understate the result")
+	assert.Contains(t, out, "Open at the end: 1 position(s), which this analytics_service (report version 0) counts in the figures above.")
 
 	for _, want := range []string{
 		`Session ` + sid + ` "v1 ema" · backtest · RUNNING · 1h`,
-		"Capital 1000.00 USDT → 1100.00 · return +10.00% · max DD 5.00 (0.5%) · return/DD 20.20",
+		"Capital 1000.00 USDT → 1100.00 on closed trades · return +10.00% · max DD 5.00 (0.5%) · return/DD 20.20",
 		"Net +100.00 = gross +130.00 − fees 20.00 − funding 10.00",
 		"best +50.00 · worst -10.00",
 		"Trades 12 (long 8 / short 4) · win rate 50.0% (long 62.5% / short 25.0%) · PF 2.00 · avg trade +8.33",
@@ -175,7 +160,7 @@ func TestSessionReport(t *testing.T) {
 		"- Run not finished (status RUNNING)",
 		"- Processed 800 of 1000 candles (80.0%), last candle 2026-02-01 12:00 against a window ending 2026-02-02 00:00",
 		"- Only 12 closed trades",
-		"- 1 position(s) open at the end, valued at their last fill: +30.00 of the net P&L (30%)",
+		"- 1 position(s) open at the end, valued at their last fill and counted in the net P&L.",
 		"- The best trade (+50.00) is 50% of the net P&L",
 		"binance_futures\tBTC/USDT\tpositions\t+80.00\t+8.00%\t8\t",
 		"2 months: 0 losing, longest losing run 0 · best 2026-02 +95.00 · worst 2026-01 +5.00",
@@ -185,6 +170,55 @@ func TestSessionReport(t *testing.T) {
 	} {
 		assert.Contains(t, out, want)
 	}
+}
+
+// Report version 3 leaves what is open out of the figures and lists it apart:
+// at the engine's recorded last close, or, for a session from before the
+// engine recorded one, at the last close the market data has, labelled so.
+func TestSessionReport_OpenAtEnd(t *testing.T) {
+	start, end := time.Date(2026, 1, 30, 0, 0, 0, 0, time.UTC), time.Date(2026, 2, 2, 0, 0, 0, 0, time.UTC)
+	markAt := end.Add(-time.Millisecond)
+	rep := reportFixture()
+	rep.ReportVersion = 3
+	rep.Total.OpenAtEnd = 2
+	rep.Total.Open = &openBlock{
+		Positions: []openPosition{
+			{Exchange: "binance_futures", Pair: "BTC/USDT", Side: "long", Qty: 0.1, AvgEntry: 50000,
+				MarkPrice: ptr(50800), MarkAt: &markAt, Unrealized: ptr(80), Fees: 2, Funding: 1},
+			{Exchange: "binance_futures", Pair: "ETH/USDT", Side: "short", Qty: 2, AvgEntry: 3000, Realized: 5, Fees: 1},
+		},
+		Realized: 5, Fees: 3, Funding: 1,
+	}
+	s := backend(t, map[string]http.HandlerFunc{
+		"/analytics/api/v1/dev/analytics/performance": jsonReply(rep),
+		"/frontend-api/api/v1/dev/sessions/" + sid: jsonReply(sessionDetail{
+			ID: sid, Status: "DONE", Timeframe: "1h", StartAt: &start, EndAt: &end,
+		}),
+		"/analytics/api/v1/dev/analytics/series": jsonReply(seriesResponse{}),
+		// Only ETH has no recorded price.
+		"/data/api/v1/candles": func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "ETH/USDT", r.URL.Query().Get("symbol"))
+			assert.Equal(t, strconv.FormatInt(end.UnixMilli(), 10), r.URL.Query().Get("to"))
+			jsonReply([]map[string]any{{"close": 2950.0, "close_time": end.UnixMilli() - 1}})(w, r)
+		},
+	})
+	out, isErr := call(t, s, "get_session_report", map[string]any{"session_id": sid})
+	require.False(t, isErr, out)
+	for _, want := range []string{
+		"Capital 1000.00 USDT → 1100.00 on closed trades",
+		"## open at the end: 2 position(s), left out of every figure above",
+		"Unrealized +180.00 at the last close · paid on them so far: fees 3.00, funding 1.00 · realized by partial closes +5.00",
+		"binance_futures\tBTC/USDT\tlong\t0.100000\t50000\t50800\t",
+		"\t+80.00\t0.00\t2.00\t1.00\t",
+		"\tengine\n",
+		"binance_futures\tETH/USDT\tshort\t2.000000\t3000\t2950\t",
+		"\t+100.00\t+5.00\t1.00\t0.00\t",
+		"\tlooked up\n",
+		"looked up: the engine recorded no price at the end",
+	} {
+		assert.Contains(t, out, want)
+	}
+	assert.NotContains(t, out, "Marked to the last close")
 }
 
 func TestLiveReportSkipsTheBacktestRecord(t *testing.T) {

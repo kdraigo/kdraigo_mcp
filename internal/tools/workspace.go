@@ -511,6 +511,8 @@ func (d Deps) reportRun(ctx context.Context, name string, run workspaceRun, wait
 	if err != nil {
 		return toolErr(err), nil
 	}
+	// The status reads while waiting do not carry it: only the start knew.
+	r.AlreadyRunning = r.AlreadyRunning || run.AlreadyRunning
 	doc := render.New()
 	renderRunHead(doc, r)
 	if r.Kind == "run" && r.KeyID != "" {
