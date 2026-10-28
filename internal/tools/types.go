@@ -282,6 +282,36 @@ type performanceReport struct {
 	InstrumentsPositive int             `json:"instruments_positive"`
 	Ratios              ratios          `json:"ratios"`
 	Warnings            []reportWarning `json:"warnings"`
+
+	// The account's value at each day's close, open positions included, and
+	// buy and hold over the window; nil where the engine did not record the
+	// days (live sessions, and backtests before it did).
+	MarkToMarket *markToMarket `json:"mark_to_market"`
+	Benchmark    *benchmark    `json:"benchmark"`
+}
+
+type markToMarket struct {
+	FinalEquity    float64  `json:"final_equity"`
+	ReturnPct      *float64 `json:"return_pct"`
+	MaxDrawdown    float64  `json:"max_drawdown"`
+	MaxDrawdownPct *float64 `json:"max_drawdown_pct"`
+	Curve          []struct {
+		Day    string  `json:"day"`
+		Equity float64 `json:"equity"`
+	} `json:"curve"`
+}
+
+type benchmark struct {
+	Instruments []struct {
+		Exchange       string  `json:"exchange"`
+		Pair           string  `json:"pair"`
+		FirstOpen      float64 `json:"first_open"`
+		LastClose      float64 `json:"last_close"`
+		ReturnPct      float64 `json:"return_pct"`
+		MaxDrawdownPct float64 `json:"max_drawdown_pct"`
+	} `json:"instruments"`
+	BasketReturnPct *float64 `json:"basket_return_pct"`
+	ExcessPct       *float64 `json:"excess_pct"`
 }
 
 // analytics_service /analytics/trades and /analytics/breakdown (report

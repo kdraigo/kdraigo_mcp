@@ -221,6 +221,44 @@ func TestSessionReport_OpenAtEnd(t *testing.T) {
 	assert.NotContains(t, out, "Marked to the last close")
 }
 
+// The account's value at each day's close and buy and hold come apart from
+// the closed-trade headline.
+func TestSessionReport_MarkToMarketAndBuyAndHold(t *testing.T) {
+	rep := reportFixture()
+	rep.ReportVersion = 3
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"final_equity": 950, "return_pct": -5, "max_drawdown": 120, "max_drawdown_pct": 11.2,
+		"curve": [{"day": "2026-01-30", "equity": 1000}, {"day": "2026-01-31", "equity": 880}, {"day": "2026-02-01", "equity": 950}]}`), &rep.MarkToMarket))
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"instruments": [
+			{"exchange": "binance_futures", "pair": "BTC/USDT", "first_open": 100, "last_close": 120, "return_pct": 20, "max_drawdown_pct": 20},
+			{"exchange": "binance_futures", "pair": "ETH/USDT", "first_open": 10, "last_close": 9, "return_pct": -10, "max_drawdown_pct": 10}],
+		"basket_return_pct": 5, "excess_pct": -10}`), &rep.Benchmark))
+	s := backend(t, map[string]http.HandlerFunc{
+		"/analytics/api/v1/dev/analytics/performance": jsonReply(rep),
+		"/analytics/api/v1/dev/analytics/series":      jsonReply(seriesResponse{}),
+		"/frontend-api/api/v1/dev/sessions/" + sid:    jsonReply(sessionDetail{ID: sid, Status: "DONE", Timeframe: "1h"}),
+	})
+	out, isErr := call(t, s, "get_session_report", map[string]any{"session_id": sid})
+	require.False(t, isErr, out)
+	for _, want := range []string{
+		"## mark to market and buy & hold (daily closes; apart from the figures above)",
+		"Value at each day's close, open positions included: 1000.00 → 950.00 USDT · return -5.00% · max DD 120.00 (11.2%) over 3 days",
+		"Buy & hold, first open → last close: BTC/USDT +20.0% (max DD 20.0%) · ETH/USDT -10.0% (max DD 10.0%) · equal weight +5.0% · the strategy -10.0% against it",
+	} {
+		assert.Contains(t, out, want)
+	}
+
+	rep.MarkToMarket, rep.Benchmark = nil, nil
+	s = backend(t, map[string]http.HandlerFunc{
+		"/analytics/api/v1/dev/analytics/performance": jsonReply(rep),
+		"/analytics/api/v1/dev/analytics/series":      jsonReply(seriesResponse{}),
+		"/frontend-api/api/v1/dev/sessions/" + sid:    jsonReply(sessionDetail{ID: sid, Status: "DONE", Timeframe: "1h"}),
+	})
+	out, _ = call(t, s, "get_session_report", map[string]any{"session_id": sid})
+	assert.NotContains(t, out, "mark to market", "not recorded: no block")
+}
+
 func TestLiveReportSkipsTheBacktestRecord(t *testing.T) {
 	s := backend(t, map[string]http.HandlerFunc{
 		"/analytics/api/v1/dev/analytics/performance": jsonReply(reportFixture()),

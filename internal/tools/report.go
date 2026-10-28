@@ -148,6 +148,7 @@ func renderReport(in *reportInputs) string {
 		optSigned(t.AvgWin), optSigned(t.AvgLoss), optSigned(t.BestTrade), optSigned(t.WorstTrade), t.Liquidations, t.OpenAtEnd)
 	doc.Line("Orders placed/filled/canceled: %s", orderTallies(&t.Orders))
 	renderOpen(doc, in)
+	renderDaily(doc, p)
 	if p.ReportVersion >= 2 {
 		renderResearch(doc, p)
 	}
