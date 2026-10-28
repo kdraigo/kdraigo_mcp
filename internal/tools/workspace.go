@@ -133,10 +133,10 @@ func (d Deps) waitArg(req mcp.CallToolRequest, def time.Duration) time.Duration 
 func addWorkspaceCreate(s *server.MCPServer, d Deps) {
 	tool := mcp.NewTool("workspace_create",
 		mcp.WithDescription("Create a cloud workspace: a strategy's .go files kept on the platform, built and run on a platform sandbox machine (no local Go or keys needed). "+
-			"It starts from a template (basic, with-indicators, with-risk-manager) on a dev_sdk version; the platform owns go.mod, so a workspace holds flat .go files in package main only. "+
+			"It starts from a template (basic, with-indicators, with-risk-manager, and from dev_sdk v1.8.1 with-atr-bracket: ATR stop and target as one bracket) on a dev_sdk version; the platform owns go.mod, so a workspace holds flat .go files in package main only. "+
 			"Then edit with workspace_write_file and run with workspace_run. Read get_sdk_docs section=\"cloud workspace\" first."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Workspace name: starts with a letter; letters, digits, _ and -; unique per account")),
-		mcp.WithString("template", mcp.Description("Starter strategy: basic, with-indicators or with-risk-manager"), mcp.DefaultString("basic")),
+		mcp.WithString("template", mcp.Description("Starter strategy: basic, with-indicators, with-risk-manager or (dev_sdk v1.8.1 and later) with-atr-bracket"), mcp.DefaultString("basic")),
 		mcp.WithString("sdk_version", mcp.Description("dev_sdk version; empty is the platform's default")),
 		additive(false),
 	)
@@ -399,7 +399,7 @@ func fileErr(name, arg, path string, status int, body []byte) error {
 
 func addWorkspaceBuild(s *server.MCPServer, d Deps) {
 	tool := mcp.NewTool("workspace_build",
-		mcp.WithDescription("Compile a workspace on a sandbox machine without running it: the fast check after an edit. Returns the import check's or the compiler's errors as file:line: message. "+
+		mcp.WithDescription("Compile a workspace on a sandbox machine without running it: the fast check after an edit. Returns the import check's or the compiler's errors as file:line: message, and go vet and staticcheck warnings. A workspace with _test.go files has its tests run too (offline, 1 min at most); a failing test fails the build with go test's output. "+
 			"A machine that has to start takes about 40 s; on a verified account a full shared pool queues the build."),
 		mcp.WithString("workspace_id", mcp.Required(), mcp.Description("Workspace UUID")),
 		mcp.WithNumber("wait", mcp.Description("Seconds to wait for the result, at most 170"), mcp.DefaultNumber(defaultBuildWait.Seconds())),

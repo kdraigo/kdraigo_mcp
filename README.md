@@ -115,7 +115,7 @@ Results come back as a few header lines and tab-separated tables, with no JSON, 
 
 ## Cloud workspace
 
-The `workspace_*` tools write, build and run a strategy on the platform: no local Go, checkout or keys. The workspace service compiles it offline on a sandbox machine (the caller's own on admin accounts, shared with other users' runs, each in its own container, on verified ones), then runs it with a key minted for that run alone, which can only open backtest sessions and is revoked when the run ends. Under gVisor the program can reach nothing but the platform API. `get_sdk_docs section="cloud workspace"` has the rules (flat `.go` files, allowed imports, `env`, limits). It is in beta for admin accounts first.
+The `workspace_*` tools write, build and run a strategy on the platform: no local Go, checkout or keys. The workspace service compiles it offline on a sandbox machine (the caller's own on pro and admin accounts, shared with other users' runs, each in its own container, on verified ones), then runs it with a key minted for that run alone, which can only open backtest sessions and is revoked when the run ends. Under gVisor the program can reach nothing but the platform API. `get_sdk_docs section="cloud workspace"` has the rules (flat `.go` files, allowed imports, `env`, limits). It is in beta for admin accounts first.
 
 ## Hosted server
 

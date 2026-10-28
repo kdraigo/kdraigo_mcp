@@ -22,7 +22,7 @@ func RegisterScaffold(s *server.MCPServer) {
 	tool := mcp.NewTool("scaffold_strategy",
 		mcp.WithDescription("Clone a starter strategy from github.com/kdraigo/example_strategy into a target directory. The resulting Go program uses dev_sdk and reads KDRAIGO_KEY_ID + KDRAIGO_PRIVATE_KEY from env."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Project name; becomes the destination dir basename. Letters, digits, _ and -.")),
-		mcp.WithString("template", mcp.Description("Template to use; defaults to 'basic'"), mcp.DefaultString("basic"), mcp.Enum("basic", "with-indicators", "with-risk-manager")),
+		mcp.WithString("template", mcp.Description("Template to use; defaults to 'basic'"), mcp.DefaultString("basic"), mcp.Enum("basic", "with-indicators", "with-risk-manager", "with-atr-bracket")),
 		mcp.WithString("dir", mcp.Required(), mcp.Description("Absolute path to the parent directory where the project will be created")),
 		additive(false),
 	)

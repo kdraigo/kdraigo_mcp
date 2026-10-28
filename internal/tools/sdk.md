@@ -643,7 +643,7 @@ s.SetOnCandleFor(types.Timeframe1h, func(ctx *types.Context, c *types.Candle) {
 - A send that cannot reach the platform is kept and retried with backoff (up to a minute apart); one the platform refuses (4xx) is dropped. Declarations are re-sent every 10 minutes. On shutdown the SDK flushes before `session_stopped`.
 - The live console re-reads the newest bars every 15 s, so a bar's values appear shortly after it closes.
 
-Limits: 32 plots and 8 panels per session, 8 levels per plot, marker text 32 characters. Plot storage per session is 8 MB basic / 64 MB verified / 256 MB admin (about 16 bytes a value: 500,000 values on basic). Past it a **backtest** keeps running, one response carries a `warning`, and later values are not stored; a **live** session keeps its newest values and drops its oldest (the warning is logged by the SDK once).
+Limits: 32 plots and 8 panels per session, 8 levels per plot, marker text 32 characters. Plot storage per session is 8 MB basic / 64 MB verified / 128 MB pro / 256 MB admin (about 16 bytes a value: 500,000 values on basic). Past it a **backtest** keeps running, one response carries a `warning`, and later values are not stored; a **live** session keeps its newest values and drops its oldest (the warning is logged by the SDK once).
 
 ## parameters
 
@@ -721,7 +721,7 @@ The cloud workspace builds and runs a strategy on the platform, so nothing is ne
 
 **How a run goes.**
 1. `workspace_build` (or the build inside `workspace_run`) compiles offline on a sandbox machine. A machine that has to start takes about 40 s; later builds take seconds.
-   - **Admin accounts** (and paid ones, later) get a machine of their own.
+   - **Pro and admin accounts** get a machine of their own.
    - **Verified accounts, and accounts signed in with Google,** share machines with other users' runs, each run in its own isolated container. When they are full, a run waits in a queue (`queued`; `workspace_run_status` shows its place) for at most 30 minutes, and its time counts only once it starts. A shared machine keeps no binary after its run.
 2. `workspace_run` then runs the binary with:
    - `KDRAIGO_KEY_ID` and `KDRAIGO_PRIVATE_KEY`: a key minted for this run alone, which can only open and stream backtest sessions and is revoked when the run ends;
@@ -734,46 +734,46 @@ The cloud workspace builds and runs a strategy on the platform, so nothing is ne
 **Your own settings** go in `workspace_run`'s `env`: upper-case names, at most 32 of them, values up to 4 KB with no line breaks, and never a `KDRAIGO_` name. A run records the names it was given, never the values.
 
 **Limits per run.**
-- **Wall-clock time:** at most 1 h (verified, Google sign-in), admin 12 h, and never more than the account's machine time left today.
+- **Wall-clock time:** at most 1 h (verified, Google sign-in), pro 4 h, admin 12 h, and never more than the account's machine time left today.
 - **Runs per day:** 200 (UTC), builds and refused ones included; admin has no cap.
 - **Stalls:** a run that prints nothing and moves (almost) no network traffic for **5 minutes** is stopped as `stalled`. That catches a strategy that sleeps or deadlocks (for example a mutex locked twice); a backtest that is streaming candles is never quiet that long. Since dev_sdk v1.8.1 a callback that has not returned after a minute logs one warning naming its candle ("the callbacks for the candle closing … have not returned"), and the run waits for it; older versions stepped past a blocked callback every 15 s, so a deadlock ran on until the time cap.
 - **Output:** kept up to 1 MB.
 
-| | basic, wallet | basic, Google sign-in | verified | admin |
-|---|---|---|---|---|
-| Cloud workspace | no (link Telegram) | yes | yes | yes |
-| Runs at once | — | 1 | 1 | 4 |
-| Machine time per day (UTC) | — | 1 h | 4 h | 24 h |
-| Workspaces | — | 3 | 10 | 50 |
-| Time per run | — | 1 h | 1 h | 12 h |
-| Machine | — | shared, queued | shared, queued | own |
-| Backtest sessions at once | 1 | 1 | 3 | 20 |
-| Pairs per backtest | 2 | 2 | 5 | no cap |
-| Bars per pair | 50,000 | 50,000 | 150,000 | no cap |
+| | basic, wallet | basic, Google sign-in | verified | pro | admin |
+|---|---|---|---|---|---|
+| Cloud workspace | no (link Telegram) | yes | yes | yes | yes |
+| Runs at once | — | 1 | 1 | 2 | 4 |
+| Machine time per day (UTC) | — | 1 h | 4 h | 8 h | 24 h |
+| Workspaces | — | 3 | 10 | 25 | 50 |
+| Time per run | — | 1 h | 1 h | 4 h | 12 h |
+| Machine | — | shared, queued | shared, queued | own | own |
+| Backtest sessions at once | 1 | 1 | 3 | 5 | 20 |
+| Pairs per backtest | 2 | 2 | 5 | 15 | no cap |
+| Bars per pair | 50,000 | 50,000 | 150,000 | 1,500,000 | no cap |
 
 A run's backtest is one of the account's sessions, wherever it was started from. A Google sign-in adds the workspace allowance; its backtests stay basic. Basic accounts also share a pool of 4 running sessions among them all. Bars are counted at the stream's timeframe: 50,000 is about 35 days of 1m or 5.7 years of 1h.
 
-Linking Telegram on the website's Account page makes an account verified. An account's newest 50 runs keep their source and output (`workspace_logs`); older runs keep only their record, and records go after 30 days.
+Linking Telegram on the website's Account page makes an account verified; paying for Pro there, or with Telegram Stars in @kdraigo_bot, makes it pro. An account's newest 50 runs keep their source and output (`workspace_logs`); older runs keep only their record, and records go after 30 days.
 
 ## limits
 
 The hosted backtester enforces these per session and per account. Normal strategies never come near them (the largest real session so far placed about 3,000 orders).
 
-What an account may use depends on its tier. **basic** is a Google account or a wallet alone (a Google account also gets a small cloud workspace, above); **verified** has a Telegram account linked on the website's account page (one Telegram account verifies one kdraigo account, and after it is unlinked it cannot verify another account for 30 days); **admin** is set by the operator. The website's Account page shows the account's tier, its limits and the storage its sessions use; each finished session in `list_sessions` carries its `storage_bytes`.
+What an account may use depends on its tier. **basic** is a Google account or a wallet alone (a Google account also gets a small cloud workspace, above); **verified** has a Telegram account linked on the website's account page (one Telegram account verifies one kdraigo account, and after it is unlinked it cannot verify another account for 30 days); **pro** is paid, in USDC or USDT on the website's account page or with Telegram Stars in @kdraigo_bot, and needs no Telegram account; **admin** is set by the operator. The website's Account page shows the account's tier, its limits and the storage its sessions use; each finished session in `list_sessions` carries its `storage_bytes`.
 
-| Per account or session | basic | verified | admin | When reached |
-|---|---|---|---|---|
-| Storage of finished sessions | 50 MB | 512 MB | no account cap | Create returns 403, code `storage_quota_exceeded`: delete old sessions (retrying does not help) |
-| A window starting before its market's first bar (or a market with no history on that exchange) | — | — | — | Create returns 400, code `no_data`, naming the first date. `get_data_coverage` lists every market's first and last bar; binance spot starts later than binance_futures |
-| Sessions at once (running, or waiting to be resumed) | 1 | 3 | 20 | Create returns 429, code `too_many_sessions`, naming the sessions that hold the slots: let one finish or end it with `close_session` |
-| Pairs per session (`Assets` × `RequestedExchanges`) | 2 | 5 | no cap | Create returns 403, code `backtest_too_large`: split the pairs over several sessions |
-| Period per session, in bars of its smallest timeframe, per pair | 50,000 (about 34 days of 1m, 5.7 years of 1h) | 150,000 (about 104 days of 1m, 17.1 years of 1h) | no cap | Create returns 403, code `backtest_too_large`: shorten `StartTime`–`EndTime` or use a longer timeframe |
-| Orders per session | 20,000 | 100,000 | 1,000,000 | That order is refused with code `order_limit_reached` and the session ends `FAILED`; orders placed before it are kept |
-| Stored reasoning per session | 8 MB | 64 MB | 256 MB of `Reason` + `Logs` | Orders keep executing; one response carries `warning`, and later reasoning is not stored |
-| Stored plot values per session (`## plots`) | 8 MB | 64 MB | 256 MB | The run continues with a `warning`. A backtest stores no later values; a live session drops its oldest |
-| Run time per session (parked time not counted) | 2 h | 4 h | 12 h | The session ends `FAILED`: "session run budget exceeded" |
+| Per account or session | basic | verified | pro | admin | When reached |
+|---|---|---|---|---|---|
+| Storage of finished sessions | 50 MB | 512 MB | 3 GB | no account cap | Create returns 403, code `storage_quota_exceeded`: delete old sessions (retrying does not help) |
+| A window starting before its market's first bar (or a market with no history on that exchange) | — | — | — | — | Create returns 400, code `no_data`, naming the first date. `get_data_coverage` lists every market's first and last bar; binance spot starts later than binance_futures |
+| Sessions at once (running, or waiting to be resumed) | 1 | 3 | 5 | 20 | Create returns 429, code `too_many_sessions`, naming the sessions that hold the slots: let one finish or end it with `close_session` |
+| Pairs per session (`Assets` × `RequestedExchanges`) | 2 | 5 | 15 | no cap | Create returns 403, code `backtest_too_large`: split the pairs over several sessions |
+| Period per session, in bars of its smallest timeframe, per pair | 50,000 (about 34 days of 1m, 5.7 years of 1h) | 150,000 (about 104 days of 1m, 17.1 years of 1h) | 1,500,000 (about 2.9 years of 1m: all of the 1m history) | no cap | Create returns 403, code `backtest_too_large`: shorten `StartTime`–`EndTime` or use a longer timeframe |
+| Orders per session | 20,000 | 100,000 | 500,000 | 1,000,000 | That order is refused with code `order_limit_reached` and the session ends `FAILED`; orders placed before it are kept |
+| Stored reasoning per session | 8 MB | 64 MB | 128 MB | 256 MB of `Reason` + `Logs` | Orders keep executing; one response carries `warning`, and later reasoning is not stored |
+| Stored plot values per session (`## plots`) | 8 MB | 64 MB | 128 MB | 256 MB | The run continues with a `warning`. A backtest stores no later values; a live session drops its oldest |
+| Run time per session (parked time not counted) | 2 h | 4 h | 8 h | 12 h | The session ends `FAILED`: "session run budget exceeded" |
 
-All basic accounts together share 4 running sessions and 10 GB of storage; when the pool is full, a basic account's create returns 503, code `capacity_exceeded`, until sessions finish or are deleted. Verified and admin accounts do not use the pool.
+All basic accounts together share 4 running sessions and 10 GB of storage; when the pool is full, a basic account's create returns 503, code `capacity_exceeded`, until sessions finish or are deleted. Verified, pro and admin accounts do not use the pool.
 
 | For everyone | Value | When reached |
 |---|---|---|

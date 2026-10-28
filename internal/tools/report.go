@@ -367,7 +367,7 @@ func renderResearch(doc *render.Doc, p *performanceReport) {
 		doc.Line("R (net, per trade with an initial stop): avg %s ± %s (std err) over %d of %d trades · sum %s · winners over 5R %d",
 			signedOpt(t.AvgR, 3), render.Opt(t.RSE, 3), t.RTrades, t.Trades, signedOpt(t.SumR, 1), t.WinnersOver5R)
 	} else {
-		doc.Line("R: no trade has an initial stop (a protective STOP_LOSS, or `stop` in the entry order's reason)")
+		doc.Line("R: no trade has an initial stop (a protective STOP_LOSS, or `stop` in the entry order's reason; the with-atr-bracket template places one with every entry)")
 	}
 	doc.Line("Without the 5 best trades net is %s (they are %s of net) · longest losing streak %d · longest underwater %s days · exposure %s · avg hold %s",
 		signedOpt(t.NetWithoutTop5, 2), optShare(t.Top5Share), t.LongestLosingStreak,
