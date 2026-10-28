@@ -643,7 +643,11 @@ func renderRunHead(doc *render.Doc, r *workspaceRun) {
 		for i, n := range names {
 			parts[i] = n + "=" + r.Params[n]
 		}
-		doc.Line("Parameters: %s.", strings.Join(parts, " "))
+		if len(r.Variants) > 0 {
+			doc.Line("Base parameters, under each variant's own: %s.", strings.Join(parts, " "))
+		} else {
+			doc.Line("Parameters: %s.", strings.Join(parts, " "))
+		}
 	}
 	if len(r.EnvNames) > 0 {
 		doc.Line("Variables given: %s.", strings.Join(r.EnvNames, ", "))
