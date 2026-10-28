@@ -34,24 +34,11 @@ func (d Deps) renderSweep(ctx context.Context, doc *render.Doc, r *workspaceRun)
 		wg.Go(func() {
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			q := url.Values{"api_key_id": {v.KeyID}, "limit": {"5"}}
-			var list []sessionSummary
-			if err := d.getJSON(ctx, "sessions of a variant", client.FrontendAPI, "/api/v1/dev/sessions", q, &list); err != nil {
-				rows[i].err = err
-				return
+			list, p, err := d.keyResult(ctx, "a variant", v.KeyID)
+			if len(list) > 0 {
+				rows[i].session = list[0].ID
 			}
-			if len(list) == 0 {
-				return
-			}
-			sort.Slice(list, func(a, b int) bool { return list[a].CreatedAt.Before(list[b].CreatedAt) })
-			rows[i].session = list[0].ID
-			var p performanceReport
-			pq := url.Values{"session_id": {list[0].ID}, "session_type": {"backtest"}}
-			if err := d.getJSON(ctx, "a variant's performance", client.Analytics, "/api/v1/dev/analytics/performance", pq, &p); err != nil {
-				rows[i].err = err
-				return
-			}
-			rows[i].perf = &p
+			rows[i].perf, rows[i].err = p, err
 		})
 	}
 	wg.Wait()
@@ -94,6 +81,27 @@ func (d Deps) renderSweep(ctx context.Context, doc *render.Doc, r *workspaceRun)
 			doc.Line("Variant %d: %v", i+1, row.err)
 		}
 	}
+}
+
+// keyResult reads what a run's key made: its sessions, oldest first, and the
+// performance report of the first (nil when it made none). what names the
+// run in errors ("a variant").
+func (d Deps) keyResult(ctx context.Context, what, keyID string) ([]sessionSummary, *performanceReport, error) {
+	q := url.Values{"api_key_id": {keyID}, "limit": {"5"}}
+	var list []sessionSummary
+	if err := d.getJSON(ctx, "sessions of "+what, client.FrontendAPI, "/api/v1/dev/sessions", q, &list); err != nil {
+		return nil, nil, err
+	}
+	if len(list) == 0 {
+		return nil, nil, nil
+	}
+	sort.Slice(list, func(a, b int) bool { return list[a].CreatedAt.Before(list[b].CreatedAt) })
+	var p performanceReport
+	pq := url.Values{"session_id": {list[0].ID}, "session_type": {"backtest"}}
+	if err := d.getJSON(ctx, what+"'s performance", client.Analytics, "/api/v1/dev/analytics/performance", pq, &p); err != nil {
+		return list, nil, err
+	}
+	return list, &p, nil
 }
 
 // variantSettings is a variant's own settings: declared values, and the

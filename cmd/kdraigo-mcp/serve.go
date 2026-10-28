@@ -24,7 +24,9 @@ import (
 // ChatGPT do not load skill files, so the workflow travels with the server.
 const hostedPreface = `This is the hosted kdraigo MCP server. Strategies are written, built and run in the user's
 cloud workspace with the workspace_* tools; there is no local mode here (no scaffold_strategy, no
-go run). Results are read with the session tools. The guide below is the kdraigo-strategy skill.
+go run). Results are read with the session tools. What earlier sessions did is kept in the user's
+research labs (lab_* and experiment_* tools): open the lab first. The guide below is the
+kdraigo-strategy skill.
 
 `
 

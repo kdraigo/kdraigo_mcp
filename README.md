@@ -57,7 +57,7 @@ Other MCP clients (or a project's `.mcp.json`) take the usual entry:
 }
 ```
 
-Restart the client. The tools below appear under the `kdraigo` server: 29 by default, 31 with the replay switch.
+Restart the client. The tools below appear under the `kdraigo` server: 47 by default, 49 with the replay switch.
 
 The two replay tools, `create_backtest_session` and `run_backtest_stream`, are off unless the server runs with `KDRAIGO_MCP_ENABLE_REPLAY=1`. They step candles through a session without running any strategy code, so they are not how a strategy is backtested. A strategy runs as its own program through dev_sdk: locally with `go run .`, or in the cloud workspace with `workspace_run`. A replay left parked also holds one of the account's session slots for up to an hour.
 
@@ -70,7 +70,7 @@ kdraigo-mcp install-skill --project <dir>    # <dir>/.claude/skills/<name>/SKILL
 
 The skills are built into the binary, so they always match its tools. Restart Claude Code to load them. Releases before v1.1.0 wrote flat `~/.claude/skills/<name>.md` files that Claude Code never loaded; the installer names any it finds so you can delete them.
 
-- [`kdraigo-strategy`](skills/kdraigo-strategy.md) — write the hypothesis → run (`go run .` or the cloud workspace) → report → drill down → record → iterate loop, how to judge a result, and the pitfalls.
+- [`kdraigo-strategy`](skills/kdraigo-strategy.md) — open the research lab → write the hypothesis → check what was already done → run (`go run .` or the cloud workspace) → report → drill down → record → hand off, how to judge a result, and the pitfalls.
 - [`kdraigo-indicators`](skills/kdraigo-indicators.md) — choose the right technical indicator by intent and wire it via the SDK.
 
 ---
@@ -97,7 +97,7 @@ Results come back as a few header lines and tab-separated tables, with no JSON, 
 | `get_analytics_types` | Lists available metric types (equity, drawdown, trading_frequency, etc.). |
 | `get_analytics_series` | Time-bucketed series for a session metric, whole session or one instrument; at most 2,000 buckets. |
 | `get_candles` | OHLCV from data_provider (public endpoint, no signing). |
-| `workspace_create` | Starts a cloud workspace from a template (`basic`, `with-indicators`, `with-risk-manager`) on a dev_sdk version. |
+| `workspace_create` | Starts a cloud workspace from a template (`basic`, `with-indicators`, `with-risk-manager`, `with-atr-bracket`) on a dev_sdk version; with `lab`, its runs are recorded in that research lab. |
 | `workspace_list` | The caller's workspaces. |
 | `workspace_files` | A workspace's files with sizes, versions and who wrote each (the Lab or API). |
 | `workspace_read_file` | A file's full content, then its version. |
@@ -110,12 +110,27 @@ Results come back as a few header lines and tab-separated tables, with no JSON, 
 | `workspace_stop` | Stops a run still going; its key is revoked. |
 | `workspace_runs` | A workspace's builds and runs, newest first. |
 | `workspace_delete` | Deletes a workspace with its files and run history; its sessions stay. |
+| `workspace_set_lab` | Puts a workspace in a research lab (or none): its runs are recorded there from then on. |
+| `lab_list` / `lab_create` | The caller's research labs; a new one with a brief to fill. |
+| `lab_open` | A lab at the start of a session: brief, last handoff, open experiments, verdicts, recent runs with their results, lessons. |
+| `lab_check` | What was already done like a planned run: an exact repeat (with `workspace_id`: same code, values, data and window), experiments on the same scope with their verdicts, related notes. |
+| `lab_search` | Full-text search over notes, experiments and lessons, one lab or all. |
+| `lab_note_read` / `lab_note_write` | A note, the brief or a lesson; writes take `base_version` so a change made in the website is refused, not lost. |
+| `lab_handoff` | Where this session stopped, shown first by the next `lab_open`. |
+| `experiment_save` / `experiment_register` / `experiment_activate` / `experiment_decide` | Draft an experiment (hypothesis, mechanism, protocol, scope), freeze it before its deciding runs, file the lab's runs under it, record its verdict. |
+| `lab_runs` / `lab_file_runs` | A lab's recorded runs with their results; file runs under an experiment. |
 | `create_backtest_session` | Replay only (`KDRAIGO_MCP_ENABLE_REPLAY=1`): creates a session on backtester_engine. |
 | `run_backtest_stream` | Replay only: steps a session to its end over WS without running strategy code. |
 
 ## Cloud workspace
 
 The `workspace_*` tools write, build and run a strategy on the platform: no local Go, checkout or keys. The workspace service compiles it offline on a sandbox machine (the caller's own on pro and admin accounts, shared with other users' runs, each in its own container, on verified ones), then runs it with a key minted for that run alone, which can only open backtest sessions and is revoked when the run ends. Under gVisor the program can reach nothing but the platform API. `get_sdk_docs section="cloud workspace"` has the rules (flat `.go` files, allowed imports, `env`, limits). It is in beta for admin accounts first.
+
+## Research labs
+
+A lab is one line of research (a futures trend strategy, a spot accumulation idea) kept apart from the others: a brief, notes in Markdown with `[[links]]`, experiments that go draft → registered (frozen and hashed) → a verdict, the runs of its workspaces, and handoffs between sessions. research_service keeps it; the website's Lab shows it.
+
+Runs of a workspace in a lab are recorded by the platform as they end: the code's hash, the declared values, exchange, pairs, timeframe and window. That is what `lab_check` matches for an exact repeat, since the engine is deterministic. The run's figures are read from its first session the next time `lab_open` or `lab_runs` lists it, and kept with the run. Local `go run .` runs are not recorded; name their sessions in the experiment's verdict.
 
 ## Hosted server
 

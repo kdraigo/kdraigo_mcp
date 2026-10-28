@@ -151,6 +151,7 @@ func addWorkspaceCreate(s *server.MCPServer, d Deps) {
 		mcp.WithString("name", mcp.Required(), mcp.Description("Workspace name: starts with a letter; letters, digits, _ and -; unique per account")),
 		mcp.WithString("template", mcp.Description("Starter strategy: basic, with-indicators, with-risk-manager or (dev_sdk v1.8.1 and later) with-atr-bracket"), mcp.DefaultString("basic")),
 		mcp.WithString("sdk_version", mcp.Description("dev_sdk version; empty is the platform's default")),
+		mcp.WithString("lab", mcp.Description("Research lab (slug or id) the workspace's runs are recorded in; see lab_list")),
 		additive(false),
 	)
 	add(s, tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -158,7 +159,11 @@ func addWorkspaceCreate(s *server.MCPServer, d Deps) {
 		if err != nil {
 			return toolErr(err), nil
 		}
+		lab := req.GetString("lab", "")
 		body := map[string]string{"name": name, "template": req.GetString("template", "basic"), "sdk_version": req.GetString("sdk_version", "")}
+		if lab != "" {
+			body["lab"] = lab
+		}
 		var det workspaceDetail
 		if err := d.sendJSON(ctx, "workspace_create", http.MethodPost, client.Workspace, "/api/v1/dev/workspaces", body, &det); err != nil {
 			return toolErr(err), nil
@@ -166,6 +171,9 @@ func addWorkspaceCreate(s *server.MCPServer, d Deps) {
 		doc := render.New()
 		w := det.Workspace
 		doc.Line("Created workspace %q (id %s): dev_sdk %s, template %s.", w.Name, w.ID, w.SDKVersion, w.Template)
+		if lab != "" {
+			doc.Line("Its runs are recorded in lab %s.", lab)
+		}
 		renderFiles(doc, det.Files)
 		doc.Line("Next: read main.go with workspace_read_file, change it with workspace_write_file, then workspace_run.")
 		return toolText(doc.String()), nil

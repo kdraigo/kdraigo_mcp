@@ -32,6 +32,7 @@ func RegisterHosted(s *server.MCPServer, d Deps) {
 	RegisterAnalytics(s, d)
 	RegisterCandles(s, d)
 	RegisterWorkspace(s, d)
+	RegisterResearch(s, d)
 }
 
 func Register(s *server.MCPServer, d Deps) {
@@ -41,6 +42,7 @@ func Register(s *server.MCPServer, d Deps) {
 	RegisterAnalytics(s, d)
 	RegisterCandles(s, d)
 	RegisterWorkspace(s, d)
+	RegisterResearch(s, d)
 	if os.Getenv(ReplayEnv) == "1" {
 		RegisterBacktest(s, d)
 	}

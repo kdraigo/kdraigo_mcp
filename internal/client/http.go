@@ -31,6 +31,8 @@ const (
 	// Workspace is workspace_service: the cloud workspace that builds and runs
 	// a strategy on a sandbox machine.
 	Workspace ServicePrefix = "/workspace"
+	// Research is research_service: the user's research labs.
+	Research ServicePrefix = "/research"
 )
 
 // HeaderStyle selects which header names carry the Ed25519 signature.
