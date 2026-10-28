@@ -746,6 +746,14 @@ The cloud workspace builds and runs a strategy on the platform, so nothing is ne
 
 **Smoke run** (dev_sdk ≥ v1.9.0). `workspace_run` with `smoke: true` first runs the strategy over the first 7 days of its window, then the full run only if that exited cleanly. A panic, a refused order or a bad setting shows in seconds instead of after a long session. The smoke session is named with " (smoke)" and is listed with the run's other sessions; the output marks where each part starts. Its time comes off the run's. Earlier versions are refused, since they would run the whole window as the "smoke" run.
 
+**Parameter sweeps.** `workspace_run` with `variants` runs the strategy once per variant, one after another on one build: each variant is an object of settings laid over `env`, e.g. `[{"STOP_ATR": "1.5"}, {"STOP_ATR": "2"}, {"STOP_ATR": "3"}]`.
+- Each variant is checked like a run before any machine starts (its declared values, its backtest), and runs with a key of its own, so its sessions are its own.
+- A variant that fails does not stop the rest; a stop, or the run's time running out, skips what is left.
+- The result is one table: each variant's settings, status, session, and its closed-trade net, return, max drawdown, trades, win rate, profit factor, and mark-to-market return.
+- **Limits:** 2 to 10 variants (verified and Google sign-in), 20 (pro), 50 (admin). Each counts as a run toward the day's runs, and all share the run's time.
+- Not combined with `smoke` yet: smoke one variant on its own first.
+- **Read it with care:** the best of N variants on one window is partly luck. Check the winner on another window before trusting it, and prefer a setting whose neighbours did nearly as well over a lone peak.
+
 **What the program can reach.** It runs as an unprivileged user under gVisor, on a read-only filesystem with a small `/tmp` that cannot execute. Its only network access is the platform API through dev_sdk: no internet, no DNS, no exchanges. **Backtests only**: live trading does not run here.
 
 **Your own settings** go in `workspace_run`'s `env`: upper-case names, at most 32 of them, values up to 4 KB with no line breaks, and never a `KDRAIGO_` name. A run records the names it was given, never the values.

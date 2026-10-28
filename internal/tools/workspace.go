@@ -92,6 +92,19 @@ type (
 		CreatedAt    time.Time  `json:"created_at"`
 		StartedAt    *time.Time `json:"started_at"`
 		FinishedAt   *time.Time `json:"finished_at"`
+		// Variants are a sweep's variants in order; empty on a plain run.
+		Variants []runVariant `json:"variants"`
+	}
+	// runVariant is one of a sweep's settings and how its run went: its
+	// declared values, the other names it set (never their values), and the
+	// key its sessions are found by.
+	runVariant struct {
+		Params   map[string]string `json:"params"`
+		EnvNames []string          `json:"env_names"`
+		Status   string            `json:"status"`
+		ExitCode *int              `json:"exit_code"`
+		Error    string            `json:"error"`
+		KeyID    string            `json:"key_id"`
 	}
 	workspaceLog struct {
 		Offset    int    `json:"offset"`
@@ -419,10 +432,14 @@ func addWorkspaceRun(s *server.MCPServer, d Deps) {
 		mcp.WithDescription("Build a workspace and run it on a sandbox machine: the strategy opens its backtest session with a key minted for this run alone (revoked when it ends). "+
 			"Waits up to `wait` seconds; a run still going returns its id for workspace_run_status. The result names the backtest sessions the run made: pass one to get_session_report. "+
 			"`env` sets your own variables (upper-case names, not KDRAIGO_*), e.g. {\"STRATEGY_RISK\":\"0.02\"}. "+
-			"`smoke` (dev_sdk v1.9.0 and later) first runs the window's first 7 days and starts the full run only if that exits cleanly: a panic or a refused order shows in seconds."),
+			"`smoke` (dev_sdk v1.9.0 and later) first runs the window's first 7 days and starts the full run only if that exits cleanly: a panic or a refused order shows in seconds. "+
+			"`variants` makes it a sweep: 2 or more settings, each over `env`, run one after another on one build; the result is one table comparing them (return, drawdown, trades, win rate, PF, fees). "+
+			"Each variant counts as a run toward the day's runs, and all share the run's time."),
 		mcp.WithString("workspace_id", mcp.Required(), mcp.Description("Workspace UUID")),
 		mcp.WithObject("env", mcp.Description("Environment variables for the strategy, name → value")),
 		mcp.WithBoolean("smoke", mcp.Description("Run the first 7 days first, then the full run if that passed (dev_sdk v1.9.0 and later)")),
+		mcp.WithArray("variants", mcp.Description("A sweep: 2 or more objects of settings (name → value), e.g. [{\"STOP_ATR\":\"1.5\"},{\"STOP_ATR\":\"2\"}]; at most 10 (verified), 20 (pro), 50 (admin)"),
+			mcp.Items(map[string]any{"type": "object"})),
 		mcp.WithNumber("wait", mcp.Description("Seconds to wait for the run to end, at most 170 (60 on the hosted server)"), mcp.DefaultNumber(defaultRunWait.Seconds())),
 		additive(false),
 	)
@@ -442,8 +459,40 @@ func addWorkspaceRun(s *server.MCPServer, d Deps) {
 		if req.GetBool("smoke", false) {
 			body["smoke"] = true
 		}
+		variants, err := variantsArg(req)
+		if err != nil {
+			return toolErr(err), nil
+		}
+		if len(variants) > 0 {
+			body["variants"] = variants
+		}
 		return d.startRun(ctx, "workspace_run", id, body, d.waitArg(req, defaultRunWait))
 	})
+}
+
+// variantsArg reads a sweep's variants: objects of settings, valued like env.
+func variantsArg(req mcp.CallToolRequest) ([]map[string]string, error) {
+	raw, ok := req.GetArguments()["variants"]
+	if !ok || raw == nil {
+		return nil, nil
+	}
+	list, ok := raw.([]any)
+	if !ok {
+		return nil, fmt.Errorf("variants must be an array of objects of name → value")
+	}
+	out := make([]map[string]string, 0, len(list))
+	for i, item := range list {
+		obj, ok := item.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("variant %d must be an object of name → value", i+1)
+		}
+		v, err := stringValues(obj, fmt.Sprintf("variant %d", i+1))
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, nil
 }
 
 // envArg reads the env object; values may be strings, numbers or booleans.
@@ -456,6 +505,12 @@ func envArg(req mcp.CallToolRequest) (map[string]string, error) {
 	if !ok {
 		return nil, fmt.Errorf("env must be an object of name → value")
 	}
+	return stringValues(obj, "env")
+}
+
+// stringValues turns an object's values into strings: strings, numbers and
+// booleans as written.
+func stringValues(obj map[string]any, what string) (map[string]string, error) {
 	env := make(map[string]string, len(obj))
 	for k, v := range obj {
 		switch v := v.(type) {
@@ -463,10 +518,12 @@ func envArg(req mcp.CallToolRequest) (map[string]string, error) {
 			env[k] = v
 		case float64:
 			env[k] = strconv.FormatFloat(v, 'f', -1, 64)
+		case int:
+			env[k] = strconv.Itoa(v)
 		case bool:
 			env[k] = strconv.FormatBool(v)
 		default:
-			return nil, fmt.Errorf("env %s: a value must be a string, number or boolean", k)
+			return nil, fmt.Errorf("%s %s: a value must be a string, number or boolean", what, k)
 		}
 	}
 	return env, nil
@@ -520,7 +577,10 @@ func (d Deps) reportRun(ctx context.Context, name string, run workspaceRun, wait
 	r.AlreadyRunning = r.AlreadyRunning || run.AlreadyRunning
 	doc := render.New()
 	renderRunHead(doc, r)
-	if r.Kind == "run" && r.KeyID != "" {
+	switch {
+	case r.Kind == "run" && len(r.Variants) > 0:
+		d.renderSweep(ctx, doc, r)
+	case r.Kind == "run" && r.KeyID != "":
 		d.renderRunSessions(ctx, doc, r)
 	}
 	if r.Kind == "run" && r.LogBytes > 0 {

@@ -387,3 +387,69 @@ func TestWorkspaceParams(t *testing.T) {
 	out, _ = call(t, s, "workspace_run_status", map[string]any{"run_id": runID})
 	assert.Contains(t, out, "Parameters: FAST_PERIOD=21 SIDE=long.")
 }
+
+// A sweep's variants reach the service as strings, and the result compares
+// them: each one's settings, status, and its session's closed-trade figures,
+// found by the variant's own key.
+func TestWorkspaceRun_SweepComparesItsVariants(t *testing.T) {
+	const (
+		k1, k2, k3 = "dddddddd-0000-0000-0000-000000000001", "dddddddd-0000-0000-0000-000000000002", "dddddddd-0000-0000-0000-000000000003"
+		s1, s2     = "eeeeeeee-0000-0000-0000-000000000001", "eeeeeeee-0000-0000-0000-000000000002"
+	)
+	var started map[string]any
+	run := map[string]any{"id": runID, "workspace_id": wsID, "kind": "run", "status": "succeeded", "active": false,
+		"error": "2 of 3 variants succeeded (1 failed, 0 skipped for time)",
+		"variants": []any{
+			map[string]any{"params": map[string]any{"STOP_ATR": "1.5"}, "env_names": []any{"X"}, "status": "succeeded", "key_id": k1},
+			map[string]any{"params": map[string]any{"STOP_ATR": "2"}, "status": "succeeded", "key_id": k2},
+			map[string]any{"params": map[string]any{"STOP_ATR": "3"}, "status": "failed", "key_id": k3},
+		}}
+	perf := func(ret, dd, pf float64, trades, wins int) map[string]any {
+		return map[string]any{"report_version": 3, "quote": "USDT", "initial_capital": 1000,
+			"total":          map[string]any{"net_pnl": ret * 10, "return_pct": ret, "max_drawdown_pct": dd, "trades": trades, "wins": wins, "profit_factor": pf},
+			"mark_to_market": map[string]any{"final_equity": 1000, "return_pct": ret - 1}}
+	}
+	s := backend(t, map[string]http.HandlerFunc{
+		wsRoute("/workspaces/" + wsID + "/runs"): func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewDecoder(r.Body).Decode(&started)
+			w.WriteHeader(http.StatusCreated)
+			jsonReply(run)(w, r)
+		},
+		"/frontend-api/api/v1/dev/sessions": func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Query().Get("api_key_id") {
+			case k1:
+				jsonReply([]any{map[string]any{"id": s1, "name": "atr", "status": "DONE"}})(w, r)
+			case k2:
+				jsonReply([]any{map[string]any{"id": s2, "name": "atr", "status": "DONE"}})(w, r)
+			default:
+				jsonReply([]any{})(w, r) // the failed one opened none
+			}
+		},
+		"/analytics/api/v1/dev/analytics/performance": func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Query().Get("session_id") == s1 {
+				jsonReply(perf(4.2, 6.1, 1.4, 20, 9))(w, r)
+				return
+			}
+			jsonReply(perf(7.5, 9.0, 1.7, 15, 8))(w, r)
+		},
+	})
+	out, isErr := call(t, s, "workspace_run", map[string]any{"workspace_id": wsID,
+		"variants": []any{map[string]any{"STOP_ATR": 1.5, "X": true}, map[string]any{"STOP_ATR": "2"}, map[string]any{"STOP_ATR": 3}}})
+	require.False(t, isErr, out)
+	assert.Equal(t, []any{
+		map[string]any{"STOP_ATR": "1.5", "X": "true"}, map[string]any{"STOP_ATR": "2"}, map[string]any{"STOP_ATR": "3"},
+	}, started["variants"], "values as strings")
+	for _, want := range []string{
+		"Sweep: 3 variants, closed-trade figures of each one's session",
+		"1\tSTOP_ATR=1.5 X=(set)\tsucceeded\t" + s1 + "\t+42.00\t+4.2%\t6.1%\t20\t45.0%\t1.40\t+3.2%",
+		"2\tSTOP_ATR=2\tsucceeded\t" + s2 + "\t+75.00\t+7.5%\t9.0%\t15\t53.3%\t1.70\t+6.5%",
+		"3\tSTOP_ATR=3\tfailed\t—",
+		"Best return: variant 2 (+7.5%)",
+		"2 of 3 variants succeeded",
+	} {
+		assert.Contains(t, out, want)
+	}
+
+	_, isErr = call(t, s, "workspace_run", map[string]any{"workspace_id": wsID, "variants": []any{"STOP_ATR=1"}})
+	assert.True(t, isErr, "a variant is an object")
+}

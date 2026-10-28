@@ -28,14 +28,16 @@ Capture that id; every result tool takes it. The window, instruments, wallets an
 
 1. **Read the SDK first.** `get_sdk_docs` once per task (`section=` to narrow it). For indicators follow the `kdraigo-indicators` skill and `get_indicator_docs`. Don't guess names, signatures or `pointType`.
 2. **Scaffold or open the strategy.**
-   - **Cloud:** `workspace_create` (`basic`, `with-indicators`, `with-risk-manager`), or `workspace_list` to reopen one, then `workspace_read_file`.
+   - **Cloud:** `workspace_create` (`basic`, `with-indicators`, `with-risk-manager`, `with-atr-bracket`), or `workspace_list` to reopen one, then `workspace_read_file`.
    - **Locally:** `scaffold_strategy` with an absolute `dir`, or work in the user's repo.
 3. **Write the hypothesis down before running.** What changes, why it should work (the mechanism), and the rule that decides it, e.g. "return/DD ≥ baseline × 1.1 on the test window and at least 6/10 instruments positive". Pick the train, test and hold-out windows now. The hold-out stays untouched until the rule is frozen.
 4. **Run.**
    - **Cloud:** `workspace_run` waits up to 150 s. For a longer run, follow it with `workspace_run_status run_id=… wait=120`. Its result names the session ids.
      - A refused or failed build lists `file:line` problems: fix and run again. A refused run can also be its declared backtest (no data for a pair, a start before the data, over the account's caps): change that parameter.
      - Warnings come with the run: fix those that apply to this strategy (randomness, goroutines, an order without a `Reason`, no stop) before trusting its result.
-     - `workspace_build` alone is the quick compile check after an edit.
+     - `workspace_build` alone is the quick compile check after an edit; it also runs the workspace's `_test.go` tests.
+     - `smoke: true` (dev_sdk ≥ v1.9.0) runs the first 7 days before a long run, so a panic shows in seconds.
+     - **Comparing settings:** `variants` runs one variant per setting on one build and returns one table. Sweep only what the hypothesis names, on the train window; then run the chosen setting alone on the test window. The best of a sweep is partly luck.
    - **Locally:** `go run .` from the strategy folder. Run anything longer than a few minutes in the background and capture the log. Take the session id from the log line above.
    - Either way, `get_session_detail` or `list_sessions` show status and progress while it runs.
 5. **Report.** `get_session_report` first, every time. **Read its warnings before its numbers.** An unfinished run, missing candles, positions open at the end or a result carried by one trade change what the numbers mean.
