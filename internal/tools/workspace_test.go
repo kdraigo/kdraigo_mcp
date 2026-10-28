@@ -91,6 +91,11 @@ func TestWorkspaceRun_FollowsItAndFindsItsSessions(t *testing.T) {
 	assert.Contains(t, out, "[done] backtest finished")
 	assert.Contains(t, out, "get_session_report")
 	assert.Contains(t, out, "STRATEGY_RISK")
+
+	started = nil
+	_, isErr = call(t, s, "workspace_run", map[string]any{"workspace_id": wsID, "smoke": true, "wait": 30})
+	require.False(t, isErr)
+	assert.Equal(t, map[string]any{"kind": "run", "smoke": true}, started, "smoke reaches the service")
 }
 
 func TestWorkspaceBuild_RefusedShowsTheProblems(t *testing.T) {

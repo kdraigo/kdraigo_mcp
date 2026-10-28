@@ -64,7 +64,7 @@ Key types you will touch:
   - **Futures backtest:** the collateral entry (`USDT`): `Free` is the cash not posted as margin, `Lock` the margin posted in open positions. Plus one entry per open position: `Asset` is the base (`BTC`), `Free` the signed size (negative = short), `Lock` its isolated margin.
   - **Live Binance futures:** collateral entries only (`Free` = the venue's available balance, `Lock` = wallet − available); read positions with `GetPositions`.
   - In backtests `asset` picks the wallet and every entry of it comes back; live, `asset` filters the entries (empty = all). `Account.Exchange` is empty in backtests.
-  - Margin available after unrealized P&L is not exposed yet.
+  - For futures, `s.GetMargin` (dev_sdk ≥ v1.9.0) adds the positions to this: see the perpetual futures section.
 
   ```go
   acc, err := s.GetAccount(ctx.Ctx, "binance_futures", "USDT")
@@ -288,6 +288,7 @@ These are optional capabilities: an adapter that lacks them returns
 ```go
 err := s.SetLeverage(ctx, "binance_futures", "BTC/USDT", 5)
 positions, err := s.GetPositions(ctx, "binance_futures") // empty exchange = all wallets
+margin, err := s.GetMargin(ctx, "binance_futures", "USDT")  // dev_sdk >= v1.9.0
 orders, err := s.PlaceBracket(ctx, &types.BracketRequest{...})
 ```
 
@@ -300,7 +301,19 @@ orders, err := s.PlaceBracket(ctx, &types.BracketRequest{...})
   margin is also the maximum loss), `MarkPrice`, `UnrealizedPnL`. In backtest,
   `RealizedPnL` and `FundingPaid` accumulate over the position's life; live leaves
   them at zero, because the venue does not attribute them per position lifetime and
-  inventing the number would misattribute payments after a flip.
+  inventing the number would misattribute payments after a flip. In backtests
+  `MarkPrice` is the pair's last close the strategy was sent (the price the engine
+  values the position at) and `UnrealizedPnL` follows from it, since dev_sdk v1.9.0;
+  earlier versions left both at zero in backtests. Right after a resume they are zero
+  until the pair's next candle.
+- **`GetMargin`** (dev_sdk ≥ v1.9.0) reads the account and the positions together
+  and returns `types.Margin` for one collateral asset: `Available` (what a new
+  position can use), `InUse` (posted as margin), `Unrealized` (the open positions'
+  P&L at their mark), `Equity` (wallet balance plus `Unrealized`), `FundingPaid`
+  (by the open positions so far; positive = paid) and `Positions`. Use it to see
+  funding eat a long-held position, or to size from equity rather than from cash.
+  The backtester and Binance futures support it; other adapters return
+  `ErrUnsupportedByAdapter`.
 - **`PlaceBracket`** places a take-profit and a protective stop as a pair. On
   futures the legs reserve nothing — margin is already posted against the position —
   so both rest at once, unlike on spot.
@@ -717,10 +730,12 @@ The cloud workspace builds and runs a strategy on the platform, so nothing is ne
   - a `go` statement outside `func main`: the replay doesn't wait for a goroutine;
   - an `OrderRequest` without a `Reason`;
   - orders with no stop anywhere: no stop order type, no `StopPrice`, no `PlaceBracket`;
-  - a declared parameter that nothing reads.
+  - a declared parameter that nothing reads;
+  - after the build, `go vet`'s advisory findings and `staticcheck`'s (2026.1: likely bugs, `SA…`, and unused code, `U1000`). A set of `go vet` analyzers (printf, copylocks, lostcancel, …) fails the build instead.
 
 **How a run goes.**
 1. `workspace_build` (or the build inside `workspace_run`) compiles offline on a sandbox machine. A machine that has to start takes about 40 s; later builds take seconds.
+   - **Tests.** A workspace with `_test.go` files has them compiled and run as part of the build, with no network, no environment and at most 1 minute. A failing test fails the build and nothing runs; the output is go test's own (`main_test.go:7: …`). Passing shows `go test: PASS`. Test the strategy's own logic (sizing, signals, levels) on hand-made candles; a test cannot reach the backtester.
    - **Pro and admin accounts** get a machine of their own.
    - **Verified accounts, and accounts signed in with Google,** share machines with other users' runs, each run in its own isolated container. When they are full, a run waits in a queue (`queued`; `workspace_run_status` shows its place) for at most 30 minutes, and its time counts only once it starts. A shared machine keeps no binary after its run.
 2. `workspace_run` then runs the binary with:
@@ -728,6 +743,8 @@ The cloud workspace builds and runs a strategy on the platform, so nothing is ne
    - `KDRAIGO_BACKTESTER_URL`: the backtester to use.
    The templates read all three; keep them that way rather than hard-coding an endpoint.
 3. The run's backtest sessions are listed by its key. `workspace_run` and `workspace_run_status` show them; pass one to `get_session_report`.
+
+**Smoke run** (dev_sdk ≥ v1.9.0). `workspace_run` with `smoke: true` first runs the strategy over the first 7 days of its window, then the full run only if that exited cleanly. A panic, a refused order or a bad setting shows in seconds instead of after a long session. The smoke session is named with " (smoke)" and is listed with the run's other sessions; the output marks where each part starts. Its time comes off the run's. Earlier versions are refused, since they would run the whole window as the "smoke" run.
 
 **What the program can reach.** It runs as an unprivileged user under gVisor, on a read-only filesystem with a small `/tmp` that cannot execute. Its only network access is the platform API through dev_sdk: no internet, no DNS, no exchanges. **Backtests only**: live trading does not run here.
 

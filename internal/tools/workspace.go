@@ -418,9 +418,11 @@ func addWorkspaceRun(s *server.MCPServer, d Deps) {
 	tool := mcp.NewTool("workspace_run",
 		mcp.WithDescription("Build a workspace and run it on a sandbox machine: the strategy opens its backtest session with a key minted for this run alone (revoked when it ends). "+
 			"Waits up to `wait` seconds; a run still going returns its id for workspace_run_status. The result names the backtest sessions the run made: pass one to get_session_report. "+
-			"`env` sets your own variables (upper-case names, not KDRAIGO_*), e.g. {\"STRATEGY_RISK\":\"0.02\"}."),
+			"`env` sets your own variables (upper-case names, not KDRAIGO_*), e.g. {\"STRATEGY_RISK\":\"0.02\"}. "+
+			"`smoke` (dev_sdk v1.9.0 and later) first runs the window's first 7 days and starts the full run only if that exits cleanly: a panic or a refused order shows in seconds."),
 		mcp.WithString("workspace_id", mcp.Required(), mcp.Description("Workspace UUID")),
 		mcp.WithObject("env", mcp.Description("Environment variables for the strategy, name → value")),
+		mcp.WithBoolean("smoke", mcp.Description("Run the first 7 days first, then the full run if that passed (dev_sdk v1.9.0 and later)")),
 		mcp.WithNumber("wait", mcp.Description("Seconds to wait for the run to end, at most 170 (60 on the hosted server)"), mcp.DefaultNumber(defaultRunWait.Seconds())),
 		additive(false),
 	)
@@ -436,6 +438,9 @@ func addWorkspaceRun(s *server.MCPServer, d Deps) {
 		body := map[string]any{"kind": "run"}
 		if len(env) > 0 {
 			body["env"] = env
+		}
+		if req.GetBool("smoke", false) {
+			body["smoke"] = true
 		}
 		return d.startRun(ctx, "workspace_run", id, body, d.waitArg(req, defaultRunWait))
 	})
