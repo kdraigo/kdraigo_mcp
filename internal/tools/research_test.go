@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mark3labs/mcp-go/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -274,4 +275,48 @@ func TestWorkspaceSetLab(t *testing.T) {
 	out, isErr := call(t, s, "workspace_set_lab", map[string]any{"workspace_id": wsID, "lab": "btc-trend"})
 	require.False(t, isErr, out)
 	assert.Equal(t, map[string]string{"lab": "btc-trend"}, got)
+}
+
+func TestLabLint(t *testing.T) {
+	s := backend(t, map[string]http.HandlerFunc{
+		labRoute("/labs/btc-trend/lint"): jsonReply(map[string]any{"findings": []any{
+			map[string]any{"level": "warn", "check": "brief_stale", "title": "Brief", "message": "the brief predates the verdict on \"RSI exit\""},
+			map[string]any{"level": "info", "check": "unfiled_runs", "message": "3 run(s) filed under no experiment"},
+		}}),
+		labRoute("/labs/clean/lint"): jsonReply(map[string]any{"findings": []any{}}),
+	})
+	out, isErr := call(t, s, "lab_lint", map[string]any{"lab": "btc-trend"})
+	require.False(t, isErr, out)
+	assert.Contains(t, out, "1 warning(s)")
+	assert.Contains(t, out, "1 thing(s) to tidy")
+	assert.Contains(t, out, `- WARN brief_stale "Brief": the brief predates`)
+	assert.Contains(t, out, "- INFO unfiled_runs 3 run(s)")
+	out, _ = call(t, s, "lab_lint", map[string]any{"lab": "clean"})
+	assert.Contains(t, out, "in order")
+}
+
+func TestLabCreate_Template(t *testing.T) {
+	var got map[string]string
+	s := backend(t, map[string]http.HandlerFunc{
+		labRoute("/labs"): func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewDecoder(r.Body).Decode(&got)
+			w.WriteHeader(http.StatusCreated)
+			jsonReply(map[string]any{"id": labID, "slug": "spot", "name": "Spot", "market": "spot"})(w, r)
+		},
+	})
+	out, isErr := call(t, s, "lab_create", map[string]any{"name": "Spot", "template": "spot-accumulation"})
+	require.False(t, isErr, out)
+	assert.Equal(t, map[string]string{"name": "Spot", "market": "", "template": "spot-accumulation"}, got)
+	assert.Contains(t, out, "market spot")
+}
+
+// The vault tools write the caller's disk: the hosted server has neither.
+func TestHosted_NoVault(t *testing.T) {
+	hosted := server.NewMCPServer("test", "0")
+	RegisterHosted(hosted, Deps{})
+	assert.Nil(t, hosted.GetTool("vault_pull"))
+	assert.Nil(t, hosted.GetTool("vault_push"))
+	assert.NotNil(t, hosted.GetTool("lab_lint"))
+	local := backend(t, nil)
+	assert.NotNil(t, local.GetTool("vault_pull"))
 }

@@ -57,7 +57,7 @@ Other MCP clients (or a project's `.mcp.json`) take the usual entry:
 }
 ```
 
-Restart the client. The tools below appear under the `kdraigo` server: 47 by default, 49 with the replay switch.
+Restart the client. The tools below appear under the `kdraigo` server: 50 by default, 52 with the replay switch.
 
 The two replay tools, `create_backtest_session` and `run_backtest_stream`, are off unless the server runs with `KDRAIGO_MCP_ENABLE_REPLAY=1`. They step candles through a session without running any strategy code, so they are not how a strategy is backtested. A strategy runs as its own program through dev_sdk: locally with `go run .`, or in the cloud workspace with `workspace_run`. A replay left parked also holds one of the account's session slots for up to an hour.
 
@@ -111,14 +111,16 @@ Results come back as a few header lines and tab-separated tables, with no JSON, 
 | `workspace_runs` | A workspace's builds and runs, newest first. |
 | `workspace_delete` | Deletes a workspace with its files and run history; its sessions stay. |
 | `workspace_set_lab` | Puts a workspace in a research lab (or none): its runs are recorded there from then on. |
-| `lab_list` / `lab_create` | The caller's research labs; a new one with a brief to fill. |
+| `lab_list` / `lab_create` | The caller's research labs; a new one with a brief to fill, blank or from a template (`futures-trend`, `spot-accumulation`). |
 | `lab_open` | A lab at the start of a session: brief, last handoff, open experiments, verdicts, recent runs with their results, lessons. |
 | `lab_check` | What was already done like a planned run: an exact repeat (with `workspace_id`: same code, values, data and window), experiments on the same scope with their verdicts, related notes. |
+| `lab_lint` | A lab's check-up: a brief never written, too long or older than the latest verdict; experiments never decided; unfiled runs; links that reach nothing; work not handed off. |
 | `lab_search` | Full-text search over notes, experiments and lessons, one lab or all. |
 | `lab_note_read` / `lab_note_write` | A note, the brief or a lesson; writes take `base_version` so a change made in the website is refused, not lost. |
 | `lab_handoff` | Where this session stopped, shown first by the next `lab_open`. |
 | `experiment_save` / `experiment_register` / `experiment_activate` / `experiment_decide` | Draft an experiment (hypothesis, mechanism, protocol, scope), freeze it before its deciding runs, file the lab's runs under it, record its verdict. |
 | `lab_runs` / `lab_file_runs` | A lab's recorded runs with their results; file runs under an experiment. |
+| `vault_pull` / `vault_push` | Local only: a lab as a folder of markdown files Obsidian opens, and its edits sent back (see Vault below). |
 | `create_backtest_session` | Replay only (`KDRAIGO_MCP_ENABLE_REPLAY=1`): creates a session on backtester_engine. |
 | `run_backtest_stream` | Replay only: steps a session to its end over WS without running strategy code. |
 
@@ -132,9 +134,28 @@ A lab is one line of research (a futures trend strategy, a spot accumulation ide
 
 Runs of a workspace in a lab are recorded by the platform as they end: the code's hash, the declared values, exchange, pairs, timeframe and window. That is what `lab_check` matches for an exact repeat, since the engine is deterministic. The run's figures are read from its first session the next time `lab_open` or `lab_runs` lists it, and kept with the run. Local `go run .` runs are not recorded; name their sessions in the experiment's verdict.
 
+## Vault (Obsidian)
+
+A lab can live as a folder of markdown files on your machine, so Obsidian opens it with its graph and Claude Code reads it like any repo:
+
+```bash
+kdraigo-mcp vault pull --lab btc-trend --dir ~/vaults/btc-trend   # the first time, into an empty folder
+kdraigo-mcp vault pull                                            # later, in the folder
+kdraigo-mcp vault status                                          # what a push would send
+kdraigo-mcp vault push [--delete]                                 # your edits back to the lab
+```
+
+| In the folder | |
+|---|---|
+| `Brief.md`, `Notes/`, `Lessons/` | read and write: a push sends them back |
+| `Experiments/`, `Handoffs/`, `Runs.md`, `README.md` | the platform's copies: your AI records these through the lab tools |
+| `.kdraigo/` | what was pulled at which version; the platform's side of a conflict |
+
+Files are named by title, so `[[Funding drag]]` opens `Notes/Funding drag.md`. Each file goes back over the version it was pulled at: a note your AI changed since is refused, never overwritten. A pull never overwrites your edits either; when both sides changed a note, the platform's text lands in `.kdraigo/conflicts/` for you to merge, and the push after that sends the merge. Renaming a file in Obsidian renames the note (its links follow, on both sides); a new file in `Notes/` becomes a new note; a deleted one is deleted on the platform only with `--delete`. In Claude Code the same works through `vault_pull` and `vault_push`.
+
 ## Hosted server
 
-`kdraigo-mcp serve --http` is the same tool set as a remote MCP server (streamable HTTP, stateless), as run at `mcp.kdraigo.com`. It leaves out `scaffold_strategy`, which writes to the caller's disk, and the replay tools; strategies run in the cloud workspace.
+`kdraigo-mcp serve --http` is the same tool set as a remote MCP server (streamable HTTP, stateless), as run at `mcp.kdraigo.com`. It leaves out `scaffold_strategy`, `vault_pull` and `vault_push`, which write to the caller's disk, and the replay tools; strategies run in the cloud workspace.
 
 - **Sign-in** is OAuth 2.1 against the platform's authorization server (users_service), per the MCP authorization spec: an unauthenticated request gets `401` with `WWW-Authenticate: Bearer resource_metadata=…`, and the server serves its protected-resource metadata (RFC 9728) at `/.well-known/oauth-protected-resource[/mcp]`. Apps register with a Client ID Metadata Document or Dynamic Client Registration, use PKCE S256, and get tokens bound to the server's URL.
 - **Each request's token** is introspected on users_service's internal port (cached for a minute) and must name this server as its audience.
@@ -164,6 +185,7 @@ kdraigo_mcp/
     hosted/                the remote server: OAuth resource, introspection, per-app keys
     render/                header + TSV rendering under the output cap
     tools/                 the MCP tools, embedded SDK + indicator docs
+    vault/                 a research lab as a folder of markdown (pull, push)
   skills/                  the skills, embedded into the binary
 ```
 

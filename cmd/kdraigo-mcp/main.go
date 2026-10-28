@@ -46,6 +46,12 @@ func main() {
 				os.Exit(1)
 			}
 			return
+		case "vault":
+			if err := runVault(os.Args[2:], os.Stdout); err != nil {
+				fmt.Fprintln(os.Stderr, "vault:", err)
+				os.Exit(1)
+			}
+			return
 		case "version", "-v", "--version":
 			fmt.Println("kdraigo-mcp", resolveVersion())
 			return
@@ -86,6 +92,9 @@ Usage:
                                Install the skills into ~/.claude/skills/ (or <dir>/.claude/skills/).
   kdraigo-mcp serve --http     Run as the hosted remote MCP server (mcp.kdraigo.com): AI apps sign
                                the user in with OAuth. Configured by KDRAIGO_MCP_* (see serve.go).
+  kdraigo-mcp vault pull|push|status
+                               A research lab as a folder of markdown files Obsidian opens
+                               (kdraigo-mcp vault help).
   kdraigo-mcp version          Print version.
   kdraigo-mcp help             Show this help.
 

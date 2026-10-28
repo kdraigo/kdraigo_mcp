@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +27,7 @@ func RegisterResearch(s *server.MCPServer, d Deps) {
 	addLabList(s, d)
 	addLabCreate(s, d)
 	addLabOpen(s, d)
+	addLabLint(s, d)
 	addLabCheck(s, d)
 	addLabSearch(s, d)
 	addLabNoteRead(s, d)
@@ -198,9 +200,12 @@ func addLabList(s *server.MCPServer, d Deps) {
 func addLabCreate(s *server.MCPServer, d Deps) {
 	tool := mcp.NewTool("lab_create",
 		mcp.WithDescription("Create a research lab: one line of research with its own knowledge, e.g. \"BTC futures trend\" or \"Spot accumulation\". "+
-			"It starts with a brief to fill (lab_note_write kind=brief): goal, constraints, best so far, dead ends, next."),
+			"It starts with a brief to fill (lab_note_write kind=brief): goal, constraints, best so far, dead ends, next. A template starts the brief "+
+			"with how a result is judged and what to watch for in that kind of research."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("The lab's name; its slug is made from it")),
-		mcp.WithString("market", mcp.Description("spot, futures or both"), mcp.Enum("spot", "futures", "both")),
+		mcp.WithString("market", mcp.Description("spot, futures or both; empty takes the template's"), mcp.Enum("spot", "futures", "both")),
+		mcp.WithString("template", mcp.Description("blank (default), futures-trend (trend following on perps, against buy and hold) or "+
+			"spot-accumulation (buying over time, against buy and hold and a 50/50 rebalance)"), mcp.Enum("blank", "futures-trend", "spot-accumulation")),
 		additive(false),
 	)
 	add(s, tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -210,7 +215,7 @@ func addLabCreate(s *server.MCPServer, d Deps) {
 		}
 		var l lab
 		if err := d.sendJSON(ctx, "lab_create", http.MethodPost, client.Research, labsAPI+"/labs",
-			map[string]string{"name": name, "market": req.GetString("market", "")}, &l); err != nil {
+			map[string]string{"name": name, "market": req.GetString("market", ""), "template": req.GetString("template", "")}, &l); err != nil {
 			return toolErr(err), nil
 		}
 		return toolText(fmt.Sprintf("Created lab %q (lab=%s, market %s). Next: write its brief (lab_note_write lab=%s kind=brief), "+
@@ -302,6 +307,52 @@ func renderOpened(o *labOpened) string {
 	doc.Line("Next: before spending a run, lab_check (with workspace_id, so an exact repeat is caught). Register an experiment before its deciding runs; " +
 		"decide it with the numbers (experiment_decide); keep the brief current; end with lab_handoff.")
 	return doc.String()
+}
+
+func addLabLint(s *server.MCPServer, d Deps) {
+	tool := mcp.NewTool("lab_lint",
+		mcp.WithDescription("Check a lab's upkeep: a brief never written, too long, or older than the latest verdict; experiments registered and never "+
+			"decided, old drafts, verdicts with no run filed, no hold-out; runs filed under nothing; [[links]] that reach nothing; notes linked to "+
+			"nothing; work not handed off. Run it when opening a lab, and fix the warnings before ending a session."),
+		mcp.WithString("lab", mcp.Required(), mcp.Description(labDesc)),
+		readOnly(),
+	)
+	add(s, tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		ref, err := labArg(req)
+		if err != nil {
+			return toolErr(err), nil
+		}
+		var out struct {
+			Findings []struct {
+				Level   string `json:"level"`
+				Check   string `json:"check"`
+				Title   string `json:"title"`
+				Message string `json:"message"`
+			} `json:"findings"`
+		}
+		if err := d.getJSON(ctx, "lab_lint", client.Research, labPath(ref)+"/lint", nil, &out); err != nil {
+			return toolErr(err), nil
+		}
+		if len(out.Findings) == 0 {
+			return toolText("The lab is in order: nothing to fix."), nil
+		}
+		warn := 0
+		for _, f := range out.Findings {
+			if f.Level == "warn" {
+				warn++
+			}
+		}
+		doc := render.New()
+		doc.Line("Lab check-up: %d warning(s) that would mislead the next session, %d thing(s) to tidy.", warn, len(out.Findings)-warn)
+		for _, f := range out.Findings {
+			what := ""
+			if f.Title != "" {
+				what = " " + strconv.Quote(f.Title) + ":"
+			}
+			doc.Line("- %s %s%s %s", strings.ToUpper(f.Level), f.Check, what, f.Message)
+		}
+		return toolText(doc.String()), nil
+	})
 }
 
 var runHeader = []string{"run_id", "when", "status", "experiment", "settings", "pairs", "tf", "window", "return", "max_dd", "trades", "pf", "session_id"}
