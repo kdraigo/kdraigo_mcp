@@ -97,7 +97,7 @@ func TestAnnotationsSayWhatEachToolDoes(t *testing.T) {
 		"workspace_create": true, "workspace_build": true, "workspace_run": true,
 		"lab_create": true, "lab_handoff": true, "experiment_activate": true, "lab_file_runs": true, "workspace_set_lab": true, "vault_pull": true,
 		"syndicate_create": true, "syndicate_join": true, "experiment_publish": true, "library_fork": true,
-		"board_create": true, "widget_add": true, "widget_update": true, "board_set_layout": true, "script_save": true}
+		"board_create": true, "widget_add": true, "widget_update": true, "board_set_layout": true, "script_save": true, "script_fork": true}
 	for name, st := range s.ListTools() {
 		a := st.Tool.Annotations
 		assert.Equal(t, destructive[name], *a.DestructiveHint, "%s destructive", name)
