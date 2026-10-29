@@ -57,7 +57,7 @@ Other MCP clients (or a project's `.mcp.json`) take the usual entry:
 }
 ```
 
-Restart the client. The tools below appear under the `kdraigo` server: 67 by default, 69 with the replay switch.
+Restart the client. The tools below appear under the `kdraigo` server: 74 by default, 76 with the replay switch.
 
 The two replay tools, `create_backtest_session` and `run_backtest_stream`, are off unless the server runs with `KDRAIGO_MCP_ENABLE_REPLAY=1`. They step candles through a session without running any strategy code, so they are not how a strategy is backtested. A strategy runs as its own program through dev_sdk: locally with `go run .`, or in the cloud workspace with `workspace_run`. A replay left parked also holds one of the account's session slots for up to an hour.
 
@@ -131,6 +131,12 @@ Results come back as a few header lines and tab-separated tables, with no JSON, 
 | `board_create` | A board for the user, or in a syndicate they write in. |
 | `widget_add` / `widget_update` / `widget_remove` | Add, change or remove one widget; every write is checked against the catalog and a refusal names the field. |
 | `board_set_layout` | Move and resize several widgets at once on the 12-column grid. |
+| `script_reference` | The kdscript language guide: syntax, every built-in, inputs, drawing calls, examples. |
+| `script_list` / `script_open` | The user's chart scripts (and their syndicates'); a script's source, inputs, plots and version. |
+| `script_check` | Check a draft without saving it: problems by line and column, or its inputs and plots. Nothing runs. |
+| `script_save` | Save a new script, or over an existing one (the newest version unless `base_version` is given); checked first. |
+| `script_preview` | Run a script on the newest bars of a pair, isolated on the platform: each plot's newest values, first time, min and max, or where it failed. |
+| `script_remove` | Delete a script that no board draws. |
 | `create_backtest_session` | Replay only (`KDRAIGO_MCP_ENABLE_REPLAY=1`): creates a session on backtester_engine. |
 | `run_backtest_stream` | Replay only: steps a session to its end over WS without running strategy code. |
 
@@ -155,6 +161,12 @@ What other people wrote reaches the AI marked as data, never instructions. Anyth
 ## Boards
 
 A **board** is the user's arrangement of widgets on the website (`kdraigo.com/boards`): price charts with lines and panes (volume, delta, CVD, funding) and optionally a backtest's trades, the live order book, a watchlist, session stats, equity curves, a P&L calendar, a research lab at a glance, notes. A widget is data the website draws, never code: `{type, title, params, at}`, checked on every write against the catalog (`widget_types`). A refusal names the field (`widgets[1] (w2).params.exchange: "binance_futures" is not one of binance, bybit`); fix it and call again. The widget tools apply to the newest version of the board, and a board open on the website updates within seconds. Moving a board into a syndicate is the user's click on the website.
+
+## Chart scripts
+
+A **chart script** is an indicator the AI writes in **kdscript**, kdraigo's own language in the shape of Pine Script v6 (`script_reference` is the whole guide; what it leaves out is listed there). A `price_chart` widget draws scripts: `params.scripts: [{"script": "my-rsi", "inputs": {"len": 21}}]`, by slug in the board's space (a syndicate's board draws the syndicate's scripts; sharing a board copies the scripts it draws). The data includes what TradingView doesn't give scripts: taker-buy volume, trade count, quote volume and funding.
+
+The loop: `script_reference` → `script_save` (problems come back as `line 4:12: …`; nothing is saved until it passes) → `script_preview` on a pair to check the numbers → `widget_add` / `widget_update` a price chart with the script. Saving checks a script and never runs it. A preview runs it on the platform in an isolated runner (no network, capped memory and CPU, a step budget and 2 s); the website runs it in the user's browser in a background worker, so a broken script fails only in its own tile.
 
 ## Vault (Obsidian)
 
