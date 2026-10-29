@@ -57,7 +57,7 @@ Other MCP clients (or a project's `.mcp.json`) take the usual entry:
 }
 ```
 
-Restart the client. The tools below appear under the `kdraigo` server: 59 by default, 61 with the replay switch.
+Restart the client. The tools below appear under the `kdraigo` server: 67 by default, 69 with the replay switch.
 
 The two replay tools, `create_backtest_session` and `run_backtest_stream`, are off unless the server runs with `KDRAIGO_MCP_ENABLE_REPLAY=1`. They step candles through a session without running any strategy code, so they are not how a strategy is backtested. A strategy runs as its own program through dev_sdk: locally with `go run .`, or in the cloud workspace with `workspace_run`. A replay left parked also holds one of the account's session slots for up to an hour.
 
@@ -126,6 +126,11 @@ Results come back as a few header lines and tab-separated tables, with no JSON, 
 | `experiment_publish` | A decided experiment as a frozen snapshot with verified result cards (and optionally its run's code), as a draft or to a syndicate. Publishing to everyone is the user's click on the website. |
 | `library_search` / `library_read` | The research library: what others published to everyone or to the user's syndicates, with filters (pair, timeframe, outcome, pre-registered, has code). |
 | `library_fork` | A publication into the user's own lab as a new draft, with its notes; with `workspace=true` its code goes into a new cloud workspace. |
+| `widget_types` | The widget catalog: each type, its params (allowed values, defaults) and an example. |
+| `board_list` / `board_open` | The user's boards (and their syndicates', as `syndicate:board`); a board's widgets with ids, places and params. |
+| `board_create` | A board for the user, or in a syndicate they write in. |
+| `widget_add` / `widget_update` / `widget_remove` | Add, change or remove one widget; every write is checked against the catalog and a refusal names the field. |
+| `board_set_layout` | Move and resize several widgets at once on the 12-column grid. |
 | `create_backtest_session` | Replay only (`KDRAIGO_MCP_ENABLE_REPLAY=1`): creates a session on backtester_engine. |
 | `run_backtest_stream` | Replay only: steps a session to its end over WS without running strategy code. |
 
@@ -146,6 +151,10 @@ A **syndicate** is a group that shares labs: in every lab tool a shared lab is n
 The **library** holds frozen snapshots of decided experiments: hypothesis, protocol and verdict, the notes chosen, one **result card** per cited run, and optionally the code a run ran (refused unless it hashes to what the run ran). The platform reads each card's figures from the engine's record and signs them; the key is public (`kdraigo.com/research/api/v1/public/card-key`). A snapshot can be a draft, go to a syndicate, or (from the website, by a Verified or Pro account, citing only the author's own runs) go to everyone.
 
 What other people wrote reaches the AI marked as data, never instructions. Anything that changes who sees what (invites, roles, sharing a whole lab, publishing to everyone) is the user's own click on the website, so a note written to steer an agent can't make it leak research.
+
+## Boards
+
+A **board** is the user's arrangement of widgets on the website (`kdraigo.com/boards`): price charts with lines and panes (volume, delta, CVD, funding) and optionally a backtest's trades, the live order book, a watchlist, session stats, equity curves, a P&L calendar, a research lab at a glance, notes. A widget is data the website draws, never code: `{type, title, params, at}`, checked on every write against the catalog (`widget_types`). A refusal names the field (`widgets[1] (w2).params.exchange: "binance_futures" is not one of binance, bybit`); fix it and call again. The widget tools apply to the newest version of the board, and a board open on the website updates within seconds. Moving a board into a syndicate is the user's click on the website.
 
 ## Vault (Obsidian)
 

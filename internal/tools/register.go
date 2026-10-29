@@ -34,6 +34,7 @@ func RegisterHosted(s *server.MCPServer, d Deps) {
 	RegisterWorkspace(s, d)
 	RegisterResearch(s, d)
 	RegisterLibrary(s, d)
+	RegisterBoards(s, d)
 }
 
 func Register(s *server.MCPServer, d Deps) {
@@ -46,6 +47,7 @@ func Register(s *server.MCPServer, d Deps) {
 	RegisterWorkspace(s, d)
 	RegisterResearch(s, d)
 	RegisterLibrary(s, d)
+	RegisterBoards(s, d)
 	if os.Getenv(ReplayEnv) == "1" {
 		RegisterBacktest(s, d)
 	}
