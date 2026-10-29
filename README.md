@@ -57,7 +57,7 @@ Other MCP clients (or a project's `.mcp.json`) take the usual entry:
 }
 ```
 
-Restart the client. The tools below appear under the `kdraigo` server: 50 by default, 52 with the replay switch.
+Restart the client. The tools below appear under the `kdraigo` server: 59 by default, 61 with the replay switch.
 
 The two replay tools, `create_backtest_session` and `run_backtest_stream`, are off unless the server runs with `KDRAIGO_MCP_ENABLE_REPLAY=1`. They step candles through a session without running any strategy code, so they are not how a strategy is backtested. A strategy runs as its own program through dev_sdk: locally with `go run .`, or in the cloud workspace with `workspace_run`. A replay left parked also holds one of the account's session slots for up to an hour.
 
@@ -121,6 +121,11 @@ Results come back as a few header lines and tab-separated tables, with no JSON, 
 | `experiment_save` / `experiment_register` / `experiment_activate` / `experiment_decide` | Draft an experiment (hypothesis, mechanism, protocol, scope), freeze it before its deciding runs, file the lab's runs under it, record its verdict. |
 | `lab_runs` / `lab_file_runs` | A lab's recorded runs with their results; file runs under an experiment. |
 | `vault_pull` / `vault_push` | Local only: a lab as a folder of markdown files Obsidian opens, and its edits sent back (see Vault below). |
+| `syndicate_list` / `syndicate_open` | The user's syndicates (groups that share labs), their members and labs. |
+| `syndicate_create` / `syndicate_join` / `syndicate_leave` | Make one (Verified or Pro), join one with an invite code, leave one. Invites and roles are done on the website. |
+| `experiment_publish` | A decided experiment as a frozen snapshot with verified result cards (and optionally its run's code), as a draft or to a syndicate. Publishing to everyone is the user's click on the website. |
+| `library_search` / `library_read` | The research library: what others published to everyone or to the user's syndicates, with filters (pair, timeframe, outcome, pre-registered, has code). |
+| `library_fork` | A publication into the user's own lab as a new draft, with its notes; with `workspace=true` its code goes into a new cloud workspace. |
 | `create_backtest_session` | Replay only (`KDRAIGO_MCP_ENABLE_REPLAY=1`): creates a session on backtester_engine. |
 | `run_backtest_stream` | Replay only: steps a session to its end over WS without running strategy code. |
 
@@ -133,6 +138,14 @@ The `workspace_*` tools write, build and run a strategy on the platform: no loca
 A lab is one line of research (a futures trend strategy, a spot accumulation idea) kept apart from the others: a brief, notes in Markdown with `[[links]]`, experiments that go draft → registered (frozen and hashed) → a verdict, the runs of its workspaces, and handoffs between sessions. research_service keeps it; the website's Lab shows it.
 
 Runs of a workspace in a lab are recorded by the platform as they end: the code's hash, the declared values, exchange, pairs, timeframe and window. That is what `lab_check` matches for an exact repeat, since the engine is deterministic. The run's figures are read from its first session the next time `lab_open` or `lab_runs` lists it, and kept with the run. Local `go run .` runs are not recorded; name their sessions in the experiment's verdict.
+
+## Syndicates and the library
+
+A **syndicate** is a group that shares labs: in every lab tool a shared lab is named `syndicate:lab`, members and their AIs write it, viewers read it. Runs of a member's workspace in a shared lab are recorded there as theirs, and `lab_check` finds a repeat across every lab the user can read.
+
+The **library** holds frozen snapshots of decided experiments: hypothesis, protocol and verdict, the notes chosen, one **result card** per cited run, and optionally the code a run ran (refused unless it hashes to what the run ran). The platform reads each card's figures from the engine's record and signs them; the key is public (`kdraigo.com/research/api/v1/public/card-key`). A snapshot can be a draft, go to a syndicate, or (from the website, by a Verified or Pro account, citing only the author's own runs) go to everyone.
+
+What other people wrote reaches the AI marked as data, never instructions. Anything that changes who sees what (invites, roles, sharing a whole lab, publishing to everyone) is the user's own click on the website, so a note written to steer an agent can't make it leak research.
 
 ## Vault (Obsidian)
 

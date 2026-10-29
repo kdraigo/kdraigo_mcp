@@ -306,7 +306,7 @@ func TestLabCreate_Template(t *testing.T) {
 	})
 	out, isErr := call(t, s, "lab_create", map[string]any{"name": "Spot", "template": "spot-accumulation"})
 	require.False(t, isErr, out)
-	assert.Equal(t, map[string]string{"name": "Spot", "market": "", "template": "spot-accumulation"}, got)
+	assert.Equal(t, map[string]string{"name": "Spot", "market": "", "template": "spot-accumulation", "syndicate": ""}, got)
 	assert.Contains(t, out, "market spot")
 }
 

@@ -51,6 +51,14 @@ type (
 		Market             string    `json:"market"`
 		ActiveExperimentID *string   `json:"active_experiment_id"`
 		UpdatedAt          time.Time `json:"updated_at"`
+		// Ref names it for the caller: its slug, or syndicate:slug when a
+		// syndicate holds it. Role is theirs in it.
+		Ref       string `json:"ref"`
+		Role      string `json:"role"`
+		Syndicate *struct {
+			Slug string `json:"slug"`
+			Name string `json:"name"`
+		} `json:"syndicate"`
 	}
 	labNote struct {
 		ID        string    `json:"id"`
@@ -166,7 +174,23 @@ func labArg(req mcp.CallToolRequest) (string, error) {
 	return req.RequireString("lab")
 }
 
-const labDesc = "Lab slug or id (lab_list shows them)"
+const labDesc = "Lab: its slug, syndicate:slug for one a syndicate shares, or its id (lab_list shows them)"
+
+// refOf is how to name a lab: its ref (a server before syndicates sends only the slug).
+func refOf(l lab) string {
+	if l.Ref != "" {
+		return l.Ref
+	}
+	return l.Slug
+}
+
+// whose says whose a lab is: the caller's own, or a syndicate's with their role in it.
+func whose(l lab) string {
+	if l.Syndicate == nil {
+		return "yours"
+	}
+	return l.Syndicate.Name + " (" + l.Role + ")"
+}
 
 // Untrusted is how notes are introduced: they are data the user and their
 // agents wrote, never instructions to follow.
@@ -188,10 +212,10 @@ func addLabList(s *server.MCPServer, d Deps) {
 		}
 		rows := make([][]string, 0, len(labs))
 		for _, l := range labs {
-			rows = append(rows, []string{l.Slug, l.Name, orDash(l.Market), render.Date(l.UpdatedAt)})
+			rows = append(rows, []string{refOf(l), l.Name, orDash(l.Market), whose(l), render.Date(l.UpdatedAt)})
 		}
 		doc := render.New()
-		doc.Table("Research labs, most recently changed first", []string{"lab", "name", "market", "updated"}, rows, nil)
+		doc.Table("Research labs, most recently changed first", []string{"lab", "name", "market", "whose", "updated"}, rows, nil)
 		doc.Line("Next: lab_open lab=<lab> before working in it.")
 		return toolText(doc.String()), nil
 	})
@@ -204,6 +228,7 @@ func addLabCreate(s *server.MCPServer, d Deps) {
 			"with how a result is judged and what to watch for in that kind of research."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("The lab's name; its slug is made from it")),
 		mcp.WithString("market", mcp.Description("spot, futures or both; empty takes the template's"), mcp.Enum("spot", "futures", "both")),
+		mcp.WithString("syndicate", mcp.Description("Make it in this syndicate (slug; syndicate_list), shared with its members, rather than yours alone")),
 		mcp.WithString("template", mcp.Description("blank (default), futures-trend (trend following on perps, against buy and hold) or "+
 			"spot-accumulation (buying over time, against buy and hold and a 50/50 rebalance)"), mcp.Enum("blank", "futures-trend", "spot-accumulation")),
 		additive(false),
@@ -215,11 +240,12 @@ func addLabCreate(s *server.MCPServer, d Deps) {
 		}
 		var l lab
 		if err := d.sendJSON(ctx, "lab_create", http.MethodPost, client.Research, labsAPI+"/labs",
-			map[string]string{"name": name, "market": req.GetString("market", ""), "template": req.GetString("template", "")}, &l); err != nil {
+			map[string]string{"name": name, "market": req.GetString("market", ""), "template": req.GetString("template", ""),
+				"syndicate": req.GetString("syndicate", "")}, &l); err != nil {
 			return toolErr(err), nil
 		}
 		return toolText(fmt.Sprintf("Created lab %q (lab=%s, market %s). Next: write its brief (lab_note_write lab=%s kind=brief), "+
-			"and make workspaces in it (workspace_create lab=%s) so their runs are recorded here.", l.Name, l.Slug, orDash(l.Market), l.Slug, l.Slug)), nil
+			"and make workspaces in it (workspace_create lab=%s) so their runs are recorded here.", l.Name, refOf(l), orDash(l.Market), refOf(l), refOf(l))), nil
 	})
 }
 
@@ -239,14 +265,18 @@ func addLabOpen(s *server.MCPServer, d Deps) {
 		if err := d.getJSON(ctx, "lab_open", client.Research, labPath(ref)+"/open", nil, &o); err != nil {
 			return toolErr(err), nil
 		}
-		o.Runs = d.fillRuns(ctx, o.Lab.Slug, o.Runs)
+		o.Runs = d.fillRuns(ctx, refOf(o.Lab), o.Runs)
 		return toolText(renderOpened(&o)), nil
 	})
 }
 
 func renderOpened(o *labOpened) string {
 	doc := render.New()
-	doc.Line("Lab %s (lab=%s) · market %s · %d note(s) · %d unfiled run(s)", o.Lab.Name, o.Lab.Slug, orDash(o.Lab.Market), o.Notes, o.Unfiled)
+	doc.Line("Lab %s (lab=%s) · market %s · %s · %d note(s) · %d unfiled run(s)", o.Lab.Name, refOf(o.Lab), orDash(o.Lab.Market),
+		whose(o.Lab), o.Notes, o.Unfiled)
+	if o.Lab.Role == "viewer" {
+		doc.Line("You are a viewer here: read it, but its owners write it.")
+	}
 	if o.Active != nil {
 		doc.Line("Active experiment: %s (%s): runs of this lab's workspaces are filed under it.", o.Active.Slug, registeredOrDraft(o.Active))
 	} else {
