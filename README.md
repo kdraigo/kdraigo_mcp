@@ -172,7 +172,8 @@ A **chart script** is an indicator the AI writes in **kdscript**, kdraigo's own 
 kdscript 1.1 adds higher timeframes (`request.security` on the chart's pair, closed bars only),
 colours that change per bar, `bgcolor`, `barcolor`, `plotchar`, `switch`, string inputs with
 options and arrays. Every save is kept as a version (the newest 50), and the script library holds
-scripts people shared, to read and fork.
+scripts people shared, to read and fork. kdscript 1.2 adds `ta.linreg`, `ta.correlation` and
+`ta.percentrank`, and `plot.style_linebr` lines stop at na bars.
 
 The loop: `script_reference` → `script_save` (problems come back as `line 4:12: …`; nothing is saved until it passes) → `script_preview` on a pair to check the numbers → `widget_add` / `widget_update` a price chart with the script. Saving checks a script and never runs it. A preview runs it on the platform in an isolated runner (no network, capped memory and CPU, a step budget and 2 s); the website runs it in the user's browser in a background worker, so a broken script fails only in its own tile.
 
