@@ -64,6 +64,10 @@ type (
 			Title string `json:"title"`
 			Kind  string `json:"kind"`
 		} `json:"plots"`
+		Alerts []struct {
+			Title   string `json:"title"`
+			Message string `json:"message"`
+		} `json:"alerts"`
 	}
 	script struct {
 		Ref       string       `json:"ref"`
@@ -198,6 +202,17 @@ func plotsLine(info scriptInfo) string {
 	return strings.Join(parts, "; ")
 }
 
+func alertsLine(info scriptInfo) string {
+	parts := make([]string, len(info.Alerts))
+	for i, a := range info.Alerts {
+		parts[i] = fmt.Sprintf("%q", a.Title)
+		if a.Message != "" {
+			parts[i] += fmt.Sprintf(" (message %q)", a.Message)
+		}
+	}
+	return strings.Join(parts, "; ")
+}
+
 func diagLines(doc *render.Doc, diags []scriptDiag) {
 	for _, d := range diags {
 		kind := "error"
@@ -284,6 +299,9 @@ func addScriptOpen(s *server.MCPServer, d Deps) {
 			doc.Line(othersContent)
 		}
 		doc.Line("Draws %q %s. Inputs: %s. Plots: %s.", sc.Info.Title, map[bool]string{true: "over the candles", false: "in a pane"}[sc.Info.Overlay], inputsLine(sc.Info.Inputs), plotsLine(sc.Info))
+		if len(sc.Info.Alerts) > 0 {
+			doc.Line("Alert conditions (arm one with alert_create): %s.", alertsLine(sc.Info))
+		}
 		doc.Blank()
 		doc.Line("```")
 		doc.Line("%s", strings.TrimRight(sc.Source, "\n"))

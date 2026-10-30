@@ -92,12 +92,13 @@ func TestAnnotationsSayWhatEachToolDoes(t *testing.T) {
 	s := backend(t, nil)
 	destructive := map[string]bool{"delete_session": true, "close_session": true, "update_session_metadata": true,
 		"workspace_write_file": true, "workspace_delete_file": true, "workspace_stop": true, "workspace_delete": true,
-		"lab_note_write": true, "experiment_save": true, "experiment_register": true, "experiment_decide": true, "vault_push": true, "syndicate_leave": true, "widget_remove": true, "script_remove": true}
+		"lab_note_write": true, "experiment_save": true, "experiment_register": true, "experiment_decide": true, "vault_push": true, "syndicate_leave": true, "widget_remove": true, "script_remove": true, "alert_delete": true}
 	writes := map[string]bool{"scaffold_strategy": true, "create_backtest_session": true, "run_backtest_stream": true, "get_session_orders": true, "get_trades": true,
 		"workspace_create": true, "workspace_build": true, "workspace_run": true,
 		"lab_create": true, "lab_handoff": true, "experiment_activate": true, "lab_file_runs": true, "workspace_set_lab": true, "vault_pull": true,
 		"syndicate_create": true, "syndicate_join": true, "experiment_publish": true, "library_fork": true,
-		"board_create": true, "widget_add": true, "widget_update": true, "board_set_layout": true, "script_save": true, "script_fork": true}
+		"board_create": true, "widget_add": true, "widget_update": true, "board_set_layout": true, "script_save": true, "script_fork": true,
+		"alert_create": true, "alert_renew": true}
 	for name, st := range s.ListTools() {
 		a := st.Tool.Annotations
 		assert.Equal(t, destructive[name], *a.DestructiveHint, "%s destructive", name)
