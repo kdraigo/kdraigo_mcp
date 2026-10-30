@@ -51,7 +51,11 @@ func serve(args []string) error {
 
 	httpClient := client.NewHTTP(envOr("KDRAIGO_ENDPOINT", "https://kdraigo.com"),
 		envOr("KDRAIGO_BACKTESTER_ENDPOINT", "https://api.kdraigo.com"), nil)
-	s := server.NewMCPServer("kdraigo", resolveVersion(), server.WithInstructions(hostedInstructions()))
+	// Each account's tool calls are limited here, with a message the agent
+	// can act on; the gateway's limits are the coarse layer in front.
+	limiter := hosted.NewLimiter(cfg.Limits, tools.IsLong, logger)
+	s := server.NewMCPServer("kdraigo", resolveVersion(), server.WithInstructions(hostedInstructions()),
+		server.WithToolHandlerMiddleware(limiter.Middleware))
 	tools.RegisterHosted(s, tools.Deps{HTTP: httpClient})
 	// Stateless: each request stands alone and is authorized on its own; no
 	// session outlives its request.
@@ -66,7 +70,8 @@ func serve(args []string) error {
 	defer stop()
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
-	logger.Printf("%s serving %s on %s (issuer %s)", resolveVersion(), cfg.Resource, cfg.Addr, cfg.Issuer)
+	logger.Printf("%s serving %s on %s (issuer %s); per account: %d tool calls a minute, %d long at once",
+		resolveVersion(), cfg.Resource, cfg.Addr, cfg.Issuer, cfg.Limits.PerMinute, cfg.Limits.Long)
 	select {
 	case err := <-errc:
 		return err

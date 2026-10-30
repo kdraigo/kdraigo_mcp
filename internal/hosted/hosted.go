@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -49,6 +50,9 @@ type Config struct {
 	// key minting), with InternalToken.
 	UsersInternalURL string
 	InternalToken    string
+	// Limits bound each account's tool calls (DefaultLimits unless
+	// KDRAIGO_MCP_CALLS_PER_MINUTE / KDRAIGO_MCP_LONG_CALLS say otherwise).
+	Limits Limits
 }
 
 // ConfigFromEnv reads the KDRAIGO_MCP_* variables.
@@ -59,6 +63,19 @@ func ConfigFromEnv() (Config, error) {
 		Issuer:           os.Getenv("KDRAIGO_MCP_ISSUER"),
 		UsersInternalURL: strings.TrimRight(env("KDRAIGO_MCP_USERS_INTERNAL_URL", "http://users_service:4002"), "/"),
 		InternalToken:    os.Getenv("KDRAIGO_MCP_INTERNAL_TOKEN"),
+		Limits:           DefaultLimits,
+	}
+	for name, dst := range map[string]*int{"KDRAIGO_MCP_CALLS_PER_MINUTE": &c.Limits.PerMinute, "KDRAIGO_MCP_LONG_CALLS": &c.Limits.Long} {
+		if v := os.Getenv(name); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 1 {
+				return c, fmt.Errorf("%s: want a whole number above 0, got %q", name, v)
+			}
+			*dst = n
+		}
+	}
+	if c.Limits.PerMinute != DefaultLimits.PerMinute {
+		c.Limits.Burst = max(1, c.Limits.PerMinute/4)
 	}
 	switch {
 	case c.Resource == "" || c.Issuer == "":
@@ -426,7 +443,7 @@ func Handler(cfg Config, mcp http.Handler, intro *Introspector, keys *Keyring, l
 			http.Error(w, "the platform is not available; try again shortly", http.StatusServiceUnavailable)
 			return
 		}
-		mcp.ServeHTTP(w, r.WithContext(client.WithSigner(r.Context(), signer)))
+		mcp.ServeHTTP(w, r.WithContext(WithIdentity(client.WithSigner(r.Context(), signer), id)))
 	})
 	return mux
 }

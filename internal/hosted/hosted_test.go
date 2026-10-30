@@ -196,3 +196,41 @@ func TestSameResource(t *testing.T) {
 	assert.False(t, sameResource("https://mcp.kdraigo.com/other", "https://mcp.kdraigo.com/mcp"))
 	assert.False(t, sameResource("", "https://mcp.kdraigo.com/mcp"))
 }
+
+// Over its account's limit, a tool call answers with a tool error that says
+// how long to wait (the connection itself stays fine), and the long tools
+// are the ones registered with the heavy timeout.
+func TestHandler_RateLimits(t *testing.T) {
+	users := &fakeUsers{user: uuid.New(), grant: uuid.New(), keyID: uuid.New()}
+	usersSrv := httptest.NewServer(users)
+	defer usersSrv.Close()
+	platform := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `[]`)
+	}))
+	defer platform.Close()
+
+	cfg := Config{Resource: testResource, Issuer: testIssuer, UsersInternalURL: usersSrv.URL, InternalToken: internalTok}
+	limiter := NewLimiter(Limits{PerMinute: 60, Burst: 2, Long: 1}, tools.IsLong, log.New(io.Discard, "", 0))
+	s := server.NewMCPServer("kdraigo", "test", server.WithToolHandlerMiddleware(limiter.Middleware))
+	tools.RegisterHosted(s, tools.Deps{HTTP: client.NewHTTP(platform.URL, platform.URL, nil)})
+	srv := httptest.NewServer(Handler(cfg, server.NewStreamableHTTPServer(s, server.WithStateLess(true)), NewIntrospector(cfg), NewKeyring(cfg),
+		log.New(io.Discard, "", 0)))
+	defer srv.Close()
+
+	var bodies []string
+	for i := 0; i < 3; i++ {
+		resp := rpc(t, srv.URL+"/mcp", "good", `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_sessions","arguments":{}}}`)
+		require.Equal(t, http.StatusOK, resp.StatusCode, "a limit is a tool answer, not an HTTP error")
+		body, _ := io.ReadAll(resp.Body)
+		bodies = append(bodies, string(body))
+	}
+	assert.NotContains(t, bodies[1], `"isError":true`)
+	assert.Contains(t, bodies[2], `"isError":true`)
+	assert.Contains(t, bodies[2], "Rate limit: at most 60 tool calls a minute per kdraigo account")
+	assert.Contains(t, limiter.accounts, users.user, "counted for the token's account")
+
+	assert.True(t, tools.IsLong("workspace_run"))
+	assert.True(t, tools.IsLong("get_session_report"))
+	assert.False(t, tools.IsLong("list_sessions"))
+}

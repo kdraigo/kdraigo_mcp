@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -42,9 +43,23 @@ func add(s *server.MCPServer, t mcp.Tool, h handler) {
 	addTimeout(s, t, callTimeout, h)
 }
 
+// longTools are the tools registered with heavyTimeout: those a call can
+// spend minutes in (a run, a build, a report over a long session). The
+// hosted server caps how many of them one account has in flight.
+var longTools sync.Map
+
+// IsLong reports whether a tool is one of the long ones.
+func IsLong(name string) bool {
+	_, ok := longTools.Load(name)
+	return ok
+}
+
 // addTimeout registers a tool whose call is bounded by d; zero leaves it to
 // the tool, for a stream that runs as long as its session does.
 func addTimeout(s *server.MCPServer, t mcp.Tool, d time.Duration, h handler) {
+	if d >= heavyTimeout {
+		longTools.Store(t.Name, true)
+	}
 	if d <= 0 {
 		s.AddTool(t, h)
 		return
