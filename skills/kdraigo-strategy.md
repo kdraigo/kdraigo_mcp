@@ -87,8 +87,8 @@ A lab is one line of the user's research, such as a futures trend strategy or a 
 
 A live bot is a strategy trading real money with the user's exchange keys, on the user's own machine. One that sends telemetry is visible here, read only: no tool starts, stops, arms or trades a bot.
 
-- **"How are my bots doing?"** `list_sessions session_type=live` names them: status (RUNNING; DISCONNECTED = no heartbeat for over 15 s; STOPPED), last heartbeat and the wallet now against the start.
-- **One bot now:** `get_session_detail session_type=live`. It shows each open position valued at the venue's mark price, with its unrealized P&L and what protects it (the resting stop and take-profit, or "none"), plus the last orders.
+- **"How are my bots doing?"** `list_live_sessions` names them: status (RUNNING; DISCONNECTED = no heartbeat for over 15 s; STOPPED), last heartbeat and the wallet now against the start. `list_sessions` lists backtests only.
+- **One bot now:** `get_live_session`. It shows each open position valued at the venue's mark price, with its unrealized P&L and what protects it (the resting stop and take-profit, or "none"), plus the last orders.
 - **Results:** `get_session_report session_type=live`, then `get_trades`, `get_breakdown`, `get_analytics_series` and `get_session_orders` with the same `session_type`.
 - Funding is not in the live record, and the figures move while the bot trades. Say both when you compare a live bot with its backtest.
 - **Flag, don't act.** A DISCONNECTED bot or an open position with no stop is something to tell the user plainly. Stopping or changing a bot is theirs to do.

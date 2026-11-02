@@ -106,7 +106,7 @@ func TestLiveSessionList(t *testing.T) {
 		"Live sessions 1–2 of 2, newest first",
 		sid + "\tkd-sub2\treal_binance_futures\tbinance_futures\tBTC/USDT\tRUNNING\t2026-10-15 13:03\t4 s ago\t16d 4h\t6\t23000\tUSDT 312.75\tUSDT 300.00\n",
 		"old-session\t—\t—\tbinance_futures\tETH/USDT\tSTOPPED\t2026-10-02 08:00\tnever\t0 s\t0\t0\tUSDT 280.00\tUSDT 300.00\n",
-		"Next: get_session_detail session_type=live",
+		"Next: get_live_session for one bot now",
 	} {
 		assert.Contains(t, out, want)
 	}
@@ -117,12 +117,26 @@ func TestLiveSessionList(t *testing.T) {
 		assert.NotEmpty(t, r.Header.Get("X-Signature"), "signed")
 		jsonReply(liveFixture())(w, r)
 	}})
-	out, isErr := call(t, s, "list_sessions", map[string]any{"session_type": "live"})
+	out, isErr := call(t, s, "list_live_sessions", nil)
 	require.False(t, isErr, out)
 	assert.Less(t, strings.Index(out, sid), strings.Index(out, "old-session"), "newest first")
+}
 
-	_, isErr = call(t, s, "list_sessions", map[string]any{"session_type": "paper"})
-	assert.True(t, isErr)
+// An account with no live bots: list_sessions says nothing of them, and a
+// live_trades that is down never fails the backtest list.
+func TestListSessionsLiveHint(t *testing.T) {
+	for name, live := range map[string]http.HandlerFunc{
+		"none": jsonReply([]liveSession{}),
+		"down": func(w http.ResponseWriter, r *http.Request) { http.Error(w, "down", 502) },
+	} {
+		s := backend(t, map[string]http.HandlerFunc{
+			"/frontend-api/api/v1/dev/sessions": jsonReply([]sessionSummary{}),
+			liveBase:                            live,
+		})
+		out, isErr := call(t, s, "list_sessions", nil)
+		require.False(t, isErr, name)
+		assert.NotContains(t, out, "Live trading bots", name)
+	}
 }
 
 func TestLiveDetail(t *testing.T) {
@@ -134,7 +148,7 @@ func TestLiveDetail(t *testing.T) {
 			jsonReply(liveReport())(w, r)
 		},
 	}))
-	out, isErr := call(t, s, "get_session_detail", map[string]any{"session_id": sid, "session_type": "live"})
+	out, isErr := call(t, s, "get_live_session", map[string]any{"session_id": sid})
 	require.False(t, isErr, out)
 	for _, want := range []string{
 		"Live session " + sid + " · strategy kd-sub2 · real_binance_futures · RUNNING · last heartbeat ",
@@ -158,9 +172,9 @@ func TestLiveDetail(t *testing.T) {
 	}
 	assert.NotContains(t, out, "Stopped ")
 
-	out, isErr = call(t, s, "get_session_detail", map[string]any{"session_id": "nope", "session_type": "live"})
+	out, isErr = call(t, s, "get_live_session", map[string]any{"session_id": "nope"})
 	assert.True(t, isErr)
-	assert.Contains(t, out, "no live session nope on this account")
+	assert.Contains(t, out, "no live session nope on this account (list_live_sessions names them)")
 }
 
 // Analytics down: the bot's status, wallet and orders still come back.
@@ -170,7 +184,7 @@ func TestLiveDetailWithoutResults(t *testing.T) {
 		liveBase + "/old-session/orders": jsonReply(liveOrdersPage{}),
 		"/analytics/api/v1/dev/analytics/performance": func(w http.ResponseWriter, r *http.Request) { http.Error(w, "down", 502) },
 	})
-	out, isErr := call(t, s, "get_session_detail", map[string]any{"session_id": "old-session", "session_type": "live"})
+	out, isErr := call(t, s, "get_live_session", map[string]any{"session_id": "old-session"})
 	require.False(t, isErr, out)
 	assert.Contains(t, out, "Stopped 2026-10-20 09:00 UTC: user stop")
 	assert.Contains(t, out, "## open now: not available (live results: HTTP 502")
@@ -312,8 +326,8 @@ func TestLiveBotsProd(t *testing.T) {
 	s := server.NewMCPServer("live", "0")
 	Register(s, Deps{HTTP: client.NewHTTP(cfg.Endpoint, cfg.BacktesterEndpoint, signer)})
 
-	out, isErr := call(t, s, "list_sessions", map[string]any{"session_type": "live"})
-	t.Logf("list_sessions live:\n%s", out)
+	out, isErr := call(t, s, "list_live_sessions", nil)
+	t.Logf("list_live_sessions:\n%s", out)
 	require.False(t, isErr)
 	running := regexp.MustCompile(`(?m)^([0-9a-f-]{36})\t[^\n]*\tRUNNING\t`).FindStringSubmatch(out)
 	if running == nil {
@@ -323,11 +337,11 @@ func TestLiveBotsProd(t *testing.T) {
 		tool string
 		args map[string]any
 	}{
-		{"get_session_detail", map[string]any{}},
-		{"get_session_orders", map[string]any{"limit": float64(10)}},
-		{"get_session_report", map[string]any{}},
+		{"get_live_session", map[string]any{}},
+		{"get_session_orders", map[string]any{"limit": float64(10), "session_type": "live"}},
+		{"get_session_report", map[string]any{"session_type": "live"}},
 	} {
-		c.args["session_id"], c.args["session_type"] = running[1], "live"
+		c.args["session_id"] = running[1]
 		out, isErr := call(t, s, c.tool, c.args)
 		t.Logf("%s:\n%s", c.tool, out)
 		require.False(t, isErr, c.tool)

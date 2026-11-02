@@ -517,12 +517,14 @@ func TestSessionListAndDetail(t *testing.T) {
 			Wallets:     []wallet{{Exchange: "binance_futures", Asset: "USDT", Balance: 472.13741}},
 			Instruments: []instrument{{Exchange: "binance_futures", Pair: "AVAX/USDT", OrderCount: 132, Filled: 122}, {Exchange: "binance_futures", Pair: "ZEC/USDT"}},
 		}),
+		"/live/api/v1/dev/live-sessions": jsonReply(liveFixture()),
 	})
 	out, isErr := call(t, s, "list_sessions", map[string]any{"limit": 2, "offset": 4})
 	require.False(t, isErr, out)
 	assert.Contains(t, out, sid+"\t\tDONE\t100%\tbinance_futures\tBTC/USDT\t1h\t2026-10-22 07:27\tbaseline,★\n")
 	assert.Contains(t, out, "other\ttab name\tPROCESSING\t—\tbybit\tETH/USDT\t15m")
 	assert.Contains(t, out, "More may follow: offset=6.")
+	assert.Contains(t, out, "Live trading bots are not listed here: this account has 2 live session(s), 1 running. list_live_sessions lists them.")
 
 	out, isErr = call(t, s, "get_session_detail", map[string]any{"session_id": sid})
 	require.False(t, isErr, out)

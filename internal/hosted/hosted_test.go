@@ -146,6 +146,7 @@ func TestHandler(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	body, _ = io.ReadAll(resp.Body)
 	assert.Contains(t, string(body), `"workspace_run"`)
+	assert.Contains(t, string(body), `"list_live_sessions"`)
 	assert.NotContains(t, string(body), `"scaffold_strategy"`, "nothing that writes to the caller's disk")
 	assert.NotContains(t, string(body), `"run_backtest_stream"`)
 
@@ -156,7 +157,11 @@ func TestHandler(t *testing.T) {
 		assert.NotContains(t, string(body), `"isError":true`, string(body))
 	}
 	mu.Lock()
-	assert.Equal(t, []string{users.keyID.String(), users.keyID.String()}, signedBy, "signed with the key minted for the connection")
+	// Each list_sessions reads the backtests and the live bots.
+	require.Len(t, signedBy, 4)
+	for _, k := range signedBy {
+		assert.Equal(t, users.keyID.String(), k, "signed with the key minted for the connection")
+	}
 	mu.Unlock()
 	users.mu.Lock()
 	require.Len(t, users.mints, 1, "one key, reused")
