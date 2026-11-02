@@ -115,7 +115,7 @@ In backtest, `to` must not exceed `ctx.Now()` — the engine rejects future fetc
 |---|---|
 | `SetOnCandle(fn)` | Every **closed** candle across all timeframes |
 | `SetOnCandleFor(tf, fn)` | Closed candle on a specific timeframe only |
-| `SetOnOrderUpdate(fn)` | Order status change |
+| `SetOnOrderUpdate(fn)` | Order status change (in a backtest, before the candle of the bar it happened in) |
 | `SetOnComplete(fn)` | Backtest finished **cleanly** (reached `done`); no-op in live |
 | `SetOnError(fn)` | Backtest ended in a terminal error (e.g. truncated stream) |
 
@@ -166,8 +166,16 @@ from the quote balance (reported on the order as `Fee`).
 
 The returned order now populates `AveragePrice`, `FilledQty`, `ID` and `Symbol`
 for a filled order (`AveragePrice == Price`, `FilledQty == Quantity`). Filled orders
-are *also* re-dispatched asynchronously to `SetOnOrderUpdate` on the following tick,
-so make order handling **idempotent** (dedupe on `order.ID`).
+are *also* dispatched to `SetOnOrderUpdate` on the following step, so make order
+handling **idempotent** (dedupe on `order.ID`).
+
+A backtest is **sequential** from dev_sdk v1.9.1: the fills of a bar (a resting stop or
+limit that filled inside it) reach `SetOnOrderUpdate` **before** that bar's `OnCandle`,
+and the engine steps on only after both have returned. A strategy that keeps its
+position in `SetOnOrderUpdate` therefore trades the same way on every run of the same
+code and data. Before v1.9.1 the two callbacks ran on separate goroutines, and which
+came first on a bar with a fill varied from run to run. In live trading they still
+arrive when the venue sends them, so keep shared state under a lock.
 
 Resting stop orders fill **intrabar**, not on the close: a SELL stop triggers on the
 bar's low, a BUY stop on its high. There is no longer any reason to simulate stops
@@ -693,6 +701,8 @@ func main() {
 The cloud workspace builds and runs a strategy on the platform, so nothing is needed locally: no Go, no checkout, no keys. The `workspace_*` tools drive it. The same program runs as it would with `go run .`; only where it runs changes.
 
 **Shape.** A workspace is flat `.go` files in package `main`: no folders, no `go.mod`, no `go.sum`. The platform owns the module and pins dev_sdk to the workspace's version. A workspace starts from a template (`basic`, `with-indicators`, `with-risk-manager`). Limits: 50 files, 256 KB each, 1 MB in all.
+
+**SDK version.** A workspace keeps the dev_sdk version it was created with; `workspace_list` shows it. Create workspaces on the platform's default (leave `sdk_version` empty). Backtests are repeatable only from v1.9.1 (see "fill semantics in backtest"): on an older version, a strategy that keeps its position in `SetOnOrderUpdate` can trade differently from run to run, so don't compare its runs with each other or trust a single one. Workspaces that were on v1.9.0 were moved to v1.9.1; older ones were not. To move a strategy onto the default, create a new workspace and copy its files over.
 
 **Editing alongside the user.** The user can open the same workspace in the website's Lab, edit its files there and watch your writes, builds and runs as they happen.
 - **Versions:** each file's version goes up with every write. `workspace_read_file` and `workspace_files` show it, and who wrote it (the Lab or API).

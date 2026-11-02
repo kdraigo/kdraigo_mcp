@@ -150,7 +150,7 @@ func addWorkspaceCreate(s *server.MCPServer, d Deps) {
 			"Then edit with workspace_write_file and run with workspace_run. Read get_sdk_docs section=\"cloud workspace\" first."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Workspace name: starts with a letter; letters, digits, _ and -; unique per account")),
 		mcp.WithString("template", mcp.Description("Starter strategy: basic, with-indicators, with-risk-manager or (dev_sdk v1.8.1 and later) with-atr-bracket"), mcp.DefaultString("basic")),
-		mcp.WithString("sdk_version", mcp.Description("dev_sdk version; empty is the platform's default")),
+		mcp.WithString("sdk_version", mcp.Description("dev_sdk version; empty is the platform's default (v1.9.1 or later), the one to use: before v1.9.1 a backtest could run the same code on the same data two ways (a bar's fills and its candle reached the strategy in either order)")),
 		mcp.WithString("lab", mcp.Description("Research lab (slug or id) the workspace's runs are recorded in; see lab_list")),
 		additive(false),
 	)
