@@ -180,7 +180,11 @@ options and arrays. Every save is kept as a version (the newest 50), and the scr
 scripts people shared, to read and fork. kdscript 1.2 adds `ta.linreg`, `ta.correlation` and
 `ta.percentrank`, and `plot.style_linebr` lines stop at na bars. kdscript 1.3 adds
 `alertcondition(cond, title, message)`: armed with `alert_create`, the platform checks it on each
-closed bar and sends the message to the user's Telegram.
+closed bar and sends the message to the user's Telegram. kdscript 1.4 adds drawn objects
+(`line`, `box`, `label`, made and changed anywhere, kept in arrays, up to 500 of each) for order
+blocks, gaps and structure breaks; strings (`+`, `str.tostring`, `str.format`, …) for label text;
+plot offsets (a pivot drawn on the bar where it formed); and 64 plots instead of 16.
+`script_preview` lists the objects a script leaves drawn.
 
 The loop: `script_reference` → `script_save` (problems come back as `line 4:12: …`; nothing is saved until it passes) → `script_preview` on a pair to check the numbers → `widget_add` / `widget_update` a price chart with the script. Saving checks a script and never runs it. A preview runs it on the platform in an isolated runner (no network, capped memory and CPU, a step budget and 2 s); the website runs it in the user's browser in a background worker, so a broken script fails only in its own tile.
 

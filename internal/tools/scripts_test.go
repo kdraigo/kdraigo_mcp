@@ -86,6 +86,11 @@ func TestScriptPreview(t *testing.T) {
 					map[string]any{"key": "p2", "title": "Band", "kind": "band", "points": 1, "first": first, "min": 3, "max": 3,
 						"last": []any{map[string]any{"t": first, "v": 3, "v2": 1}}},
 				},
+				"drawings_total": 3,
+				"drawings": []any{
+					map[string]any{"kind": "box", "t1": first, "t2": first + 7_200_000, "y1": 105.5, "y2": 101, "extend": "right", "color": "#ef5350", "fill": "#ef535026"},
+					map[string]any{"kind": "label", "t1": first + 3_600_000, "y1": 105.5, "text": "BOS 105.5", "style": "label_down"},
+				},
 			})(w, r)
 		},
 	})
@@ -98,6 +103,9 @@ func TestScriptPreview(t *testing.T) {
 	assert.Contains(t, out, "history index 9000")
 	assert.Contains(t, out, "3 / 1")
 	assert.Contains(t, out, "\t-") // p2 has no value on the second bar
+	assert.Contains(t, out, "Drawn objects after the last bar: 3, the newest 2 here")
+	assert.Contains(t, out, "box\t2026-01-01 00:00 → 2026-01-01 02:00\t105.5 … 101\tright\t#ef5350 #ef535026\t\n")
+	assert.Contains(t, out, "label\t2026-01-01 01:00 @ 105.5\t-\t\tlabel_down\tBOS 105.5\n")
 }
 
 func TestScriptVersionsAndLibrary(t *testing.T) {

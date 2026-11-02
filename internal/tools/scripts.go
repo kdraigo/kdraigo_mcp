@@ -135,10 +135,27 @@ type (
 			Max    *float64      `json:"max"`
 			Last   []scriptPoint `json:"last"`
 		} `json:"plots"`
-		Bars   int   `json:"bars"`
-		From   int64 `json:"from"`
-		To     int64 `json:"to"`
-		Millis int64 `json:"ms"`
+		Drawings      []scriptDrawing `json:"drawings"`
+		DrawingsTotal int             `json:"drawings_total"`
+		Bars          int             `json:"bars"`
+		From          int64           `json:"from"`
+		To            int64           `json:"to"`
+		Millis        int64           `json:"ms"`
+	}
+
+	// scriptDrawing is a line, box or label a script left drawn.
+	scriptDrawing struct {
+		Kind      string  `json:"kind"`
+		T1        int64   `json:"t1"`
+		Y1        float64 `json:"y1"`
+		T2        int64   `json:"t2"`
+		Y2        float64 `json:"y2"`
+		Extend    string  `json:"extend"`
+		Color     string  `json:"color"`
+		Fill      string  `json:"fill"`
+		Style     string  `json:"style"`
+		Text      string  `json:"text"`
+		TextColor string  `json:"text_color"`
 	}
 )
 
@@ -399,7 +416,7 @@ func addScriptSave(s *server.MCPServer, d Deps) {
 
 func addScriptPreview(s *server.MCPServer, d Deps) {
 	tool := mcp.NewTool("script_preview",
-		mcp.WithDescription("Run a chart script on the newest bars of a pair (on the platform, isolated) and show each plot's last values, first value time, min and max, or where it failed. Use it to check an indicator's numbers before drawing it."),
+		mcp.WithDescription("Run a chart script on the newest bars of a pair (on the platform, isolated) and show each plot's last values (a marker's: the price it is drawn at), first value time, min and max, and the lines, boxes and labels it leaves drawn, or where it failed. Use it to check an indicator's numbers and zones before drawing it on a board."),
 		mcp.WithString("script", mcp.Description("A saved script: its slug, or syndicate:slug")),
 		mcp.WithString("source", mcp.Description("Or a draft script's whole source (not saved)")),
 		mcp.WithString("exchange", mcp.Required(), mcp.Description("binance, binance_futures, bybit or bybit_futures")),
@@ -504,8 +521,37 @@ func renderPreview(out previewResult) string {
 	for _, t := range times {
 		rows = append(rows, append([]string{msTime(t)}, byTime[t]...))
 	}
-	doc.Table("Newest values (- : no value on that bar; bands are upper / lower; markers show where they fire)", cols, rows, nil)
+	doc.Table("Newest values (- : no value on that bar; bands are upper / lower; a marker's value is the price it is drawn at, then its text)", cols, rows, nil)
+	renderDrawings(doc, out.Drawings, out.DrawingsTotal)
 	return doc.String()
+}
+
+// renderDrawings lists the lines, boxes and labels the script left drawn,
+// newest last: where each one is, its colours and text.
+func renderDrawings(doc *render.Doc, ds []scriptDrawing, total int) {
+	if total == 0 {
+		return
+	}
+	doc.Blank()
+	title := fmt.Sprintf("Drawn objects after the last bar: %d", total)
+	if len(ds) < total {
+		title += fmt.Sprintf(", the newest %d here", len(ds))
+	}
+	rows := make([][]string, 0, len(ds))
+	for _, d := range ds {
+		from, to := msTime(d.T1)+" @ "+sig(d.Y1), "-"
+		switch d.Kind {
+		case "line":
+			to = msTime(d.T2) + " @ " + sig(d.Y2)
+		case "box":
+			from = msTime(d.T1) + " → " + msTime(d.T2)
+			to = sig(d.Y1) + " … " + sig(d.Y2)
+		}
+		look := strings.Trim(strings.Join([]string{d.Color, d.Fill, d.Style}, " "), " ")
+		rows = append(rows, []string{d.Kind, from, to, d.Extend, look, d.Text})
+	}
+	doc.Table(title+" (line: from @ price, to @ price; box: left → right, top … bottom; label: bar @ price)",
+		[]string{"kind", "at", "to", "extend", "colour, fill, style", "text"}, rows, nil)
 }
 
 func addScriptRemove(s *server.MCPServer, d Deps) {
