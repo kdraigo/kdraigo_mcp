@@ -842,6 +842,7 @@ Live: &types.LiveOptions{
 - Events are signed with the same `Credentials.KeyID` / `PrivateKey` as backtests. Telemetry for a session that belongs to another account is refused (403).
 - Telemetry powers the **Live strategies** page on kdraigo.com and, when the account has linked Telegram, alerts from **@kdraigo_bot** (position opened, SL/TP moves, partly closed, closed, bot offline, stopped, daily summary) and the Telegram Mini App dashboard.
 - Reason and logs are truncated as described under `## placing orders`; the order itself is never refused for it.
+- The same telemetry is what an AI connected through this MCP server reads, read only: `list_sessions session_type=live`, `get_session_detail session_type=live` (open positions at the mark price, their resting stop and take-profit), `get_session_orders` and `get_session_report` with `session_type=live`. A bot without telemetry is invisible to all of them.
 
 ## known gaps
 

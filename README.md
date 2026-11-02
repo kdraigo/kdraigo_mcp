@@ -87,9 +87,9 @@ Results come back as a few header lines and tab-separated tables, with no JSON, 
 | `get_session_report` | A backtest's or live session's results in one call: return, drawdown, return/DD, P&L split, trades and win rate per side, average R with its standard error, net without the 5 best trades, losing streak, time underwater, daily Sharpe/Sortino/Calmar, a table per instrument, P&L per month, and the platform's warnings (unfinished run, missing candles, few trades, no stops, open positions, concentration). |
 | `get_trades` | Every trade with entry, exit, net, initial stop and R; filter, sort by net or R, or `save_to` a CSV. Needs analytics_service with report version 2. |
 | `get_breakdown` | Trades grouped by period, instrument, side, exit kind, holding time, weekday or hour, each group with win rate, net, profit factor and R. |
-| `list_sessions` | The caller's sessions, newest first, with status and progress. |
-| `get_session_detail` | One session's record: window, progress, starting wallets, instruments with fills and fees. |
-| `get_session_orders` | Orders filtered by instrument, status, role and time; `with_reason` adds the strategy's reason and logs; `save_to` writes every match to a local CSV. |
+| `list_sessions` | The caller's sessions, newest first, with status and progress. `session_type=live`: the caller's live bots, with status, last heartbeat and the wallet now against the start. |
+| `get_session_detail` | One session's record: window, progress, starting wallets, instruments with fills and fees. `session_type=live`: one bot now, with its open positions valued at the mark price, what protects each (resting stop and take-profit) and its last orders. |
+| `get_session_orders` | Orders filtered by instrument, status, role and time; `with_reason` adds the strategy's reason and logs; `save_to` writes every match to a local CSV. Takes `session_type=live` too. |
 | `get_session_positions` | Futures positions a session held, paged, with open and liquidated counts (empty for spot). |
 | `get_session_funding` | Funding ledger, one row per settlement, paged, with totals (empty for spot). |
 | `update_session_metadata` | Patches `name`, `notes`, `tags`, `favorite`. |

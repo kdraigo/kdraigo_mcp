@@ -59,7 +59,8 @@ type reportInputs struct {
 	detailErr error
 	days      []seriesPoint
 	daysErr   error
-	// openErr says which open positions have no price at the end.
+	// openErr says which open positions have no price (at the end, or now
+	// for a live session).
 	openErr error
 }
 
@@ -102,6 +103,10 @@ func (d Deps) fetchReport(ctx context.Context, id, kind string) *reportInputs {
 		} else {
 			in.openErr = fmt.Errorf("the session's end is unknown, so open positions have no price")
 		}
+	}
+	// A live session's open positions have no recorded price: value them now.
+	if o := in.perf.Total.Open; kind == "live" && in.perfErr == nil && o != nil && o.Unrealized == nil {
+		in.openErr = d.priceOpenNow(ctx, o, time.Now())
 	}
 	return in
 }
@@ -357,7 +362,7 @@ func reportWarnings(in *reportInputs) []string {
 	if len(p.UnpricedAssets) > 0 {
 		out = append(out, fmt.Sprintf("Starting balances with no price, left out of capital: %s.", strings.Join(p.UnpricedAssets, ", ")))
 	}
-	return out
+	return append(out, liveWarnings(in)...)
 }
 
 // renderResearch adds what report version 2 measures: R, how much the result
@@ -392,7 +397,15 @@ func serverWarnings(in *reportInputs) []string {
 	if in.detail == nil && in.detailErr != nil {
 		out = append(out, fmt.Sprintf("Session record not available: %v", in.detailErr))
 	}
-	return out
+	return append(out, liveWarnings(in)...)
+}
+
+// liveWarnings: what a live report leaves out that a backtest's has.
+func liveWarnings(in *reportInputs) []string {
+	if in.kind != "live" {
+		return nil
+	}
+	return []string{"Live session: funding is not in the live record, so net P&L leaves it out, and the figures change as the bot trades."}
 }
 
 func signedOpt(v *float64, dp int) string {

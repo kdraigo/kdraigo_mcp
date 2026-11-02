@@ -1,6 +1,6 @@
 ---
 name: kdraigo-strategy
-description: Develop, backtest and judge Go trading strategies on the kdraigo platform through the kdraigo MCP server, locally or in the cloud workspace. Use when the user wants to write or scaffold a strategy, run or analyse a backtest, compare runs, decide whether a change helped, or names a kdraigo session id.
+description: Develop, backtest and judge Go trading strategies on the kdraigo platform through the kdraigo MCP server, locally or in the cloud workspace, and read how the user's live bots are doing. Use when the user wants to write or scaffold a strategy, run or analyse a backtest, compare runs, decide whether a change helped, check on a live bot, or names a kdraigo session id.
 ---
 
 # kdraigo-strategy
@@ -82,6 +82,17 @@ A lab is one line of the user's research, such as a futures trend strategy or a 
 - **R multiples.** The report's average R (net over the risk to the initial stop) comes with its standard error. An average under two standard errors from zero is not an edge yet. R needs an initial stop on every trade: if the report says R covers few trades, add the stop (see below) before judging per-trade quality.
 - **Daily ratios.** Sharpe, Sortino and Calmar come from daily closed-trade equity, so they understate volatility inside trades. Use them to rank variants on the same window, not as absolute claims.
 - **Open at end.** Every figure is closed trades only; positions still open at the end are listed apart with their unrealized P&L at the last close. If that is large against the result, the result is unfinished: say so rather than adding the two.
+
+## Live bots
+
+A live bot is a strategy trading real money with the user's exchange keys, on the user's own machine. One that sends telemetry is visible here, read only: no tool starts, stops, arms or trades a bot.
+
+- **"How are my bots doing?"** `list_sessions session_type=live` names them: status (RUNNING; DISCONNECTED = no heartbeat for over 15 s; STOPPED), last heartbeat and the wallet now against the start.
+- **One bot now:** `get_session_detail session_type=live`. It shows each open position valued at the venue's mark price, with its unrealized P&L and what protects it (the resting stop and take-profit, or "none"), plus the last orders.
+- **Results:** `get_session_report session_type=live`, then `get_trades`, `get_breakdown`, `get_analytics_series` and `get_session_orders` with the same `session_type`.
+- Funding is not in the live record, and the figures move while the bot trades. Say both when you compare a live bot with its backtest.
+- **Flag, don't act.** A DISCONNECTED bot or an open position with no stop is something to tell the user plainly. Stopping or changing a bot is theirs to do.
+- **An empty list may be the wrong account.** Each kdraigo account sees only its own bots, and a bot appears only once it sends telemetry.
 
 ## Pitfalls
 

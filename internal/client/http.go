@@ -33,6 +33,9 @@ const (
 	Workspace ServicePrefix = "/workspace"
 	// Research is research_service: the user's research labs.
 	Research ServicePrefix = "/research"
+	// Live is live_trades: what the user's live bots report (sessions,
+	// orders, balances, order reasoning), read only.
+	Live ServicePrefix = "/live"
 )
 
 // HeaderStyle selects which header names carry the Ed25519 signature.

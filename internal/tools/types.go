@@ -193,8 +193,10 @@ type openPosition struct {
 	Fees       float64    `json:"fees"`
 	Funding    float64    `json:"funding"`
 
-	// lookedUp: the price came from market data here, the engine had none.
-	lookedUp bool
+	// source is where the price came from when this tool found it: "looked
+	// up" (a backtest's last close, the engine had none), "mark" or "last
+	// trade" (a live position valued now). Empty: the engine's own.
+	source string
 }
 
 type stats struct {

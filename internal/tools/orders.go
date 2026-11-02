@@ -30,11 +30,12 @@ const (
 
 func addGetSessionOrders(s *server.MCPServer, d Deps) {
 	tool := mcp.NewTool("get_session_orders",
-		mcp.WithDescription("A backtest session's orders, newest first, filtered and a page at a time: when placed and executed, instrument, side, type, role, status, size, price, stop trigger, fill and fee, and the bracket group. "+
+		mcp.WithDescription("A session's orders, newest first, filtered and a page at a time: when placed and executed, instrument, side, type, role, status, size, price, stop trigger, fill and fee, and the bracket group. "+
 			"role is what the order was for: market, limit, stop_loss, take_profit or liquidation. "+
 			fmt.Sprintf("with_reason adds the strategy's own reason and log lines for each order (at most %d orders a page then). ", maxReasonOrders)+
 			"save_to writes every matching order to a local CSV instead of returning rows (with reason and logs too when with_reason is set); use it for anything you want to analyse in full."),
 		mcp.WithString("session_id", mcp.Required(), mcp.Description("Session UUID")),
+		mcp.WithString("session_type", mcp.Description("backtest (default) or live: a live bot's order log, with the same columns and filters; the id is the exchange's order id"), mcp.DefaultString("backtest"), mcp.Enum("backtest", "live")),
 		mcp.WithString("exchange", mcp.Description("Only this exchange, as the session's instruments name it")),
 		mcp.WithString("pair", mcp.Description("Only this pair, e.g. BTC/USDT")),
 		mcp.WithString("status", mcp.Description("Only these statuses, comma-separated, e.g. FILLED or CANCELED,EXPIRED")),
@@ -56,6 +57,13 @@ func addGetSessionOrders(s *server.MCPServer, d Deps) {
 		q, err := orderFilters(req)
 		if err != nil {
 			return toolErr(err), nil
+		}
+		live, err := sessionType(req.GetString("session_type", "backtest"))
+		if err != nil {
+			return toolErr(err), nil
+		}
+		if live {
+			return d.liveOrdersTool(ctx, req, id, q), nil
 		}
 		if path := req.GetString("save_to", ""); path != "" {
 			return d.saveOrders(ctx, id, q, path, req.GetBool("with_reason", false)), nil
@@ -166,8 +174,8 @@ var orderCSVHeader = []string{
 	"amount", "price", "stop_price", "filled_qty", "avg_price", "fee", "fee_asset", "group_id",
 }
 
-// saveOrders writes every matching order to a CSV at path, a page of /orders
-// at a time. The server's own orders.csv leaves out the role, stop trigger and
+// saveOrders writes every matching order of a backtest to a CSV at path, a
+// page of /orders at a time. The server's own orders.csv leaves out the role, stop trigger and
 // bracket group, which are what a trade's risk is worked out from. The file is
 // written beside its destination and renamed into place, so a failed export
 // never leaves half a file behind.
@@ -175,14 +183,6 @@ func (d Deps) saveOrders(ctx context.Context, id string, q url.Values, path stri
 	if err := checkSavePath(path); err != nil {
 		return toolErr(err)
 	}
-	var buf bytes.Buffer
-	w := csv.NewWriter(&buf)
-	header := orderCSVHeader
-	if withReason {
-		header = append(append([]string{}, header...), "reason", "logs")
-	}
-	_ = w.Write(header)
-
 	q.Set("session_id", id)
 	q.Set("limit", strconv.Itoa(maxOrdersLimit))
 	q.Set("fields", "summary")
@@ -212,10 +212,21 @@ func (d Deps) saveOrders(ctx context.Context, id string, q url.Values, path stri
 			return toolErr(fmt.Errorf("more than %d orders match: narrow with exchange/pair or from/to and save in parts", maxSavedOrders))
 		}
 	}
+	return writeOrdersCSV(path, all, withReason)
+}
+
+// writeOrdersCSV writes orders (newest first) to path, oldest first.
+func writeOrdersCSV(path string, all []order, withReason bool) *mcp.CallToolResult {
+	var buf bytes.Buffer
+	w := csv.NewWriter(&buf)
+	header := orderCSVHeader
+	if withReason {
+		header = append(append([]string{}, header...), "reason", "logs")
+	}
+	_ = w.Write(header)
 	for i := len(all) - 1; i >= 0; i-- {
 		_ = w.Write(orderCSVRow(&all[i], withReason))
 	}
-	n := len(all)
 	w.Flush()
 	if err := w.Error(); err != nil {
 		return toolErr(err)
@@ -224,7 +235,53 @@ func (d Deps) saveOrders(ctx context.Context, id string, q url.Values, path stri
 		return toolErr(err)
 	}
 	return toolText(fmt.Sprintf("Saved %d orders (%s) to %s\nColumns: %s\nOldest first; times are RFC 3339 UTC; executed_at is empty for an order that never filled or was canceled.\n",
-		n, sizeOf(buf.Len()), path, strings.Join(header, ",")))
+		len(all), sizeOf(buf.Len()), path, strings.Join(header, ",")))
+}
+
+// liveOrdersTool is get_session_orders for a live session: the whole order
+// log read from live_trades, filtered here.
+func (d Deps) liveOrdersTool(ctx context.Context, req mcp.CallToolRequest, id string, q url.Values) *mcp.CallToolResult {
+	path := req.GetString("save_to", "")
+	if path != "" {
+		if err := checkSavePath(path); err != nil {
+			return toolErr(err)
+		}
+	}
+	all, err := d.liveOrders(ctx, id)
+	if err != nil {
+		return toolErr(err)
+	}
+	withReason := req.GetBool("with_reason", false)
+	if path != "" {
+		matched := filterLive(all, q)
+		if withReason && len(matched) > maxLiveReasonExport {
+			return toolErr(fmt.Errorf("%d orders match; with_reason exports at most %d from a live session (one read an order): narrow with pair or from/to, or save without reasons", len(matched), maxLiveReasonExport))
+		}
+		orders := make([]order, len(matched))
+		for i := range matched {
+			orders[i] = matched[i].asOrder()
+		}
+		if withReason {
+			if err := d.withLiveReasons(ctx, id, orders); err != nil {
+				return toolErr(err)
+			}
+		}
+		return writeOrdersCSV(path, orders, withReason)
+	}
+
+	limit, offset := pageArgs(req, defaultOrdersLimit, maxOrdersLimit)
+	note := ""
+	if withReason && limit > maxReasonOrders {
+		note = fmt.Sprintf("with_reason pages are at most %d orders; limit lowered from %d.", maxReasonOrders, limit)
+		limit = maxReasonOrders
+	}
+	page := liveOrdersPageFor(all, q, limit, offset)
+	if withReason {
+		if err := d.withLiveReasons(ctx, id, page.Orders); err != nil {
+			return toolErr(err)
+		}
+	}
+	return toolText(renderOrders(page, withReason, note))
 }
 
 func orderCSVRow(o *order, withReason bool) []string {
