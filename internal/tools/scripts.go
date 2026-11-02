@@ -135,12 +135,19 @@ type (
 			Max    *float64      `json:"max"`
 			Last   []scriptPoint `json:"last"`
 		} `json:"plots"`
-		Drawings      []scriptDrawing `json:"drawings"`
-		DrawingsTotal int             `json:"drawings_total"`
-		Bars          int             `json:"bars"`
-		From          int64           `json:"from"`
-		To            int64           `json:"to"`
-		Millis        int64           `json:"ms"`
+		Drawings        []scriptDrawing `json:"drawings"`
+		DrawingsTotal   int             `json:"drawings_total"`
+		DrawingsMatched int             `json:"drawings_matched"`
+		DrawingCounts   []struct {
+			Kind  string `json:"kind"`
+			Text  string `json:"text"`
+			Count int    `json:"count"`
+		} `json:"drawing_counts"`
+		Warnings []scriptDiag `json:"warnings"`
+		Bars     int          `json:"bars"`
+		From     int64        `json:"from"`
+		To       int64        `json:"to"`
+		Millis   int64        `json:"ms"`
 	}
 
 	// scriptDrawing is a line, box or label a script left drawn.
@@ -416,7 +423,7 @@ func addScriptSave(s *server.MCPServer, d Deps) {
 
 func addScriptPreview(s *server.MCPServer, d Deps) {
 	tool := mcp.NewTool("script_preview",
-		mcp.WithDescription("Run a chart script on the newest bars of a pair (on the platform, isolated) and show each plot's last values (a marker's: the price it is drawn at), first value time, min and max, and the lines, boxes and labels it leaves drawn, or where it failed. Use it to check an indicator's numbers and zones before drawing it on a board."),
+		mcp.WithDescription("Run a chart script on the newest bars of a pair (on the platform, isolated) and show each plot's last values (a marker's: the price it is drawn at), first value time, min and max; the lines, boxes and labels it leaves drawn, counted by kind and text, with the newest listed (narrow the list with drawings_kind and drawings_text); the run's warnings; or where it failed. Use it to check an indicator's numbers and zones before drawing it on a board."),
 		mcp.WithString("script", mcp.Description("A saved script: its slug, or syndicate:slug")),
 		mcp.WithString("source", mcp.Description("Or a draft script's whole source (not saved)")),
 		mcp.WithString("exchange", mcp.Required(), mcp.Description("binance, binance_futures, bybit or bybit_futures")),
@@ -425,6 +432,8 @@ func addScriptPreview(s *server.MCPServer, d Deps) {
 		mcp.WithObject("inputs", mcp.Description(`The script's inputs by name, e.g. {"len": 21}`)),
 		mcp.WithNumber("bars", mcp.Description("How many of the newest bars to run over (default 500, at most 5000)")),
 		mcp.WithNumber("last", mcp.Description("How many of each plot's newest values to show (default 20, at most 500)")),
+		mcp.WithString("drawings_kind", mcp.Description("List only drawn objects of this kind: line, box or label (the counts still cover all)"), mcp.Enum("line", "box", "label")),
+		mcp.WithString("drawings_text", mcp.Description("List only drawn objects whose text contains this, e.g. BOS")),
 		readOnly(),
 	)
 	add(s, tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -442,7 +451,8 @@ func addScriptPreview(s *server.MCPServer, d Deps) {
 		}
 		body := map[string]any{"script": req.GetString("script", ""), "source": req.GetString("source", ""),
 			"exchange": exchange, "symbol": symbol, "timeframe": req.GetString("timeframe", ""),
-			"bars": req.GetInt("bars", 0), "last": req.GetInt("last", 20)}
+			"bars": req.GetInt("bars", 0), "last": req.GetInt("last", 20),
+			"drawings_kind": req.GetString("drawings_kind", ""), "drawings_text": req.GetString("drawings_text", "")}
 		if inputs != nil {
 			body["inputs"] = inputs
 		}
@@ -477,7 +487,9 @@ func renderPreview(out previewResult) string {
 		doc.Line("It failed%s: %s. The values below are from the bars before.", where, out.Error.Msg)
 	}
 	diagLines(doc, out.Diags)
+	diagLines(doc, out.Warnings)
 	if len(out.Plots) == 0 {
+		renderDrawings(doc, out)
 		return doc.String()
 	}
 	summary := make([][]string, 0, len(out.Plots))
@@ -522,20 +534,38 @@ func renderPreview(out previewResult) string {
 		rows = append(rows, append([]string{msTime(t)}, byTime[t]...))
 	}
 	doc.Table("Newest values (- : no value on that bar; bands are upper / lower; a marker's value is the price it is drawn at, then its text)", cols, rows, nil)
-	renderDrawings(doc, out.Drawings, out.DrawingsTotal)
+	renderDrawings(doc, out)
 	return doc.String()
 }
 
-// renderDrawings lists the lines, boxes and labels the script left drawn,
-// newest last: where each one is, its colours and text.
-func renderDrawings(doc *render.Doc, ds []scriptDrawing, total int) {
+// renderDrawings counts the lines, boxes and labels the script left drawn
+// by kind and text, then lists the newest of those the filters keep: where
+// each one is, its colours and text.
+func renderDrawings(doc *render.Doc, out previewResult) {
+	total, ds := out.DrawingsTotal, out.Drawings
 	if total == 0 {
 		return
 	}
 	doc.Blank()
-	title := fmt.Sprintf("Drawn objects after the last bar: %d", total)
-	if len(ds) < total {
+	counts := make([][]string, 0, len(out.DrawingCounts))
+	for _, c := range out.DrawingCounts {
+		counts = append(counts, []string{c.Kind, c.Text, fmt.Sprint(c.Count)})
+	}
+	doc.Table(fmt.Sprintf("Drawn objects after the last bar: %d, by kind and text (the biggest groups)", total), []string{"kind", "text", "count"}, counts, nil)
+	matched := total
+	if out.DrawingsMatched > 0 || len(ds) == 0 {
+		matched = out.DrawingsMatched
+	}
+	title := "Listed"
+	if matched < total {
+		title = fmt.Sprintf("Listed: %d match the filters", matched)
+	}
+	if len(ds) < matched {
 		title += fmt.Sprintf(", the newest %d here", len(ds))
+	}
+	if len(ds) == 0 {
+		doc.Line("%s.", title)
+		return
 	}
 	rows := make([][]string, 0, len(ds))
 	for _, d := range ds {

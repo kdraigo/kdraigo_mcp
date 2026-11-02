@@ -86,7 +86,9 @@ func TestScriptPreview(t *testing.T) {
 					map[string]any{"key": "p2", "title": "Band", "kind": "band", "points": 1, "first": first, "min": 3, "max": 3,
 						"last": []any{map[string]any{"t": first, "v": 3, "v2": 1}}},
 				},
-				"drawings_total": 3,
+				"drawings_total": 3, "drawings_matched": 2,
+				"drawing_counts": []any{map[string]any{"kind": "box", "text": "", "count": 2}, map[string]any{"kind": "label", "text": "BOS 105.5", "count": 1}},
+				"warnings":       []any{map[string]any{"pos": map[string]int{"line": 4, "col": 7}, "msg": "request.security: 15m is below the chart's timeframe (1h), so it gives na here", "warning": true}},
 				"drawings": []any{
 					map[string]any{"kind": "box", "t1": first, "t2": first + 7_200_000, "y1": 105.5, "y2": 101, "extend": "right", "color": "#ef5350", "fill": "#ef535026"},
 					map[string]any{"kind": "label", "t1": first + 3_600_000, "y1": 105.5, "text": "BOS 105.5", "style": "label_down"},
@@ -94,16 +96,21 @@ func TestScriptPreview(t *testing.T) {
 			})(w, r)
 		},
 	})
-	out, isErr := call(t, s, "script_preview", map[string]any{"script": "bands", "exchange": "binance", "symbol": "BTC/USDT", "inputs": map[string]any{"len": 9}})
+	out, isErr := call(t, s, "script_preview", map[string]any{"script": "bands", "exchange": "binance", "symbol": "BTC/USDT", "inputs": map[string]any{"len": 9}, "drawings_text": "BOS"})
 	require.False(t, isErr, out)
 	assert.Equal(t, map[string]any{"len": float64(9)}, body["inputs"])
 	assert.EqualValues(t, 20, body["last"])
+	assert.Equal(t, "BOS", body["drawings_text"])
 	assert.Contains(t, out, `Ran "Bands" on 500 bars`)
 	assert.Contains(t, out, "It failed at line 9:3 on the bar of")
 	assert.Contains(t, out, "history index 9000")
 	assert.Contains(t, out, "3 / 1")
 	assert.Contains(t, out, "\t-") // p2 has no value on the second bar
-	assert.Contains(t, out, "Drawn objects after the last bar: 3, the newest 2 here")
+	assert.Contains(t, out, "- line 4:7 warning: request.security: 15m is below the chart's timeframe (1h), so it gives na here")
+	assert.Contains(t, out, "Drawn objects after the last bar: 3, by kind and text")
+	assert.Contains(t, out, "box\t\t2\n")
+	assert.Contains(t, out, "label\tBOS 105.5\t1\n")
+	assert.Contains(t, out, "Listed: 2 match the filters (line:")
 	assert.Contains(t, out, "box\t2026-01-01 00:00 → 2026-01-01 02:00\t105.5 … 101\tright\t#ef5350 #ef535026\t\n")
 	assert.Contains(t, out, "label\t2026-01-01 01:00 @ 105.5\t-\t\tlabel_down\tBOS 105.5\n")
 }
