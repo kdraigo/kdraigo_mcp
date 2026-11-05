@@ -3,7 +3,7 @@ name: image
 # The hosted server's image (ghcr.io/kdraigo/kdraigo-mcp), built on a release
 # tag. This repository is public, so it builds on GitHub's runners only and
 # never on the platform's self-hosted runner; the deployment repository
-# deploys the image (mcp/docker-compose.yml).
+# deploys the image to its k3s cluster (the release line in mcp/image).
 on:
   push:
     tags: ["v*"]
