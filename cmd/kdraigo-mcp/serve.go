@@ -35,7 +35,7 @@ kdraigo-strategy skill.
 //	KDRAIGO_MCP_ADDR                (:8090)
 //	KDRAIGO_MCP_RESOURCE            https://mcp.kdraigo.com/mcp
 //	KDRAIGO_MCP_ISSUER              https://mcp.kdraigo.com
-//	KDRAIGO_MCP_USERS_INTERNAL_URL  (http://users_service:4002)
+//	KDRAIGO_MCP_USERS_INTERNAL_URL  (http://users-service:4002)
 //	KDRAIGO_MCP_INTERNAL_TOKEN      users_service's INTERNAL_MINT_TOKEN
 //	KDRAIGO_ENDPOINT                (https://kdraigo.com)
 //	KDRAIGO_BACKTESTER_ENDPOINT     (https://api.kdraigo.com)

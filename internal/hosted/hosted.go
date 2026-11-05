@@ -61,7 +61,7 @@ func ConfigFromEnv() (Config, error) {
 		Addr:             env("KDRAIGO_MCP_ADDR", ":8090"),
 		Resource:         os.Getenv("KDRAIGO_MCP_RESOURCE"),
 		Issuer:           os.Getenv("KDRAIGO_MCP_ISSUER"),
-		UsersInternalURL: strings.TrimRight(env("KDRAIGO_MCP_USERS_INTERNAL_URL", "http://users_service:4002"), "/"),
+		UsersInternalURL: strings.TrimRight(env("KDRAIGO_MCP_USERS_INTERNAL_URL", "http://users-service:4002"), "/"),
 		InternalToken:    os.Getenv("KDRAIGO_MCP_INTERNAL_TOKEN"),
 		Limits:           DefaultLimits,
 	}
