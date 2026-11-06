@@ -99,6 +99,7 @@ Results come back as a few header lines and tab-separated tables, with no JSON, 
 | `get_analytics_types` | Lists available metric types (equity, drawdown, trading_frequency, etc.). |
 | `get_analytics_series` | Time-bucketed series for a session metric, whole session or one instrument; at most 2,000 buckets. |
 | `get_candles` | OHLCV from data_provider (public endpoint, no signing). |
+| `get_flow` | Trade flow per bar from data_provider (public): taker buy/sell volume and counts, delta, VWAP, large prints; on perpetuals liquidations, open interest, funding, mark and index. |
 | `workspace_create` | Starts a cloud workspace from a template (`basic`, `with-indicators`, `with-risk-manager`, `with-atr-bracket`) on a dev_sdk version; with `lab`, its runs are recorded in that research lab. |
 | `workspace_list` | The caller's workspaces. |
 | `workspace_files` | A workspace's files with sizes, versions and who wrote each (the Lab or API). |
