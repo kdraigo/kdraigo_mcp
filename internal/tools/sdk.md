@@ -39,7 +39,7 @@ types.Config{
         PrivateKey: os.Getenv("KDRAIGO_PRIVATE_KEY"), // hex-encoded ed25519 private key
     },
     Backtest: &types.BacktestOptions{
-        Endpoint:           "http://localhost:4000", // override per environment
+        Endpoint:           "https://api.kdraigo.com", // hosted engine; http://localhost:4000 for a local one
         SessionName:        "v1",
         RequestedExchanges: []string{"binance"},
         Assets:             []string{"BTC/USDT"},
@@ -155,7 +155,7 @@ triggers when the bar trades at or below `StopPrice`, a BUY stop at or above —
 short's protective stop is expressible. **An unknown order type is rejected**; it
 previously became a plain limit order, which behaves as the opposite of a stop.
 
-`Reason` and `Logs` are forwarded to the backtester engine and persisted alongside the order. Use them — they are returned by the orders endpoint/tool so a run can be reviewed and explained after the fact. They are capped exactly as live telemetry is: a `Reason` over 4 KB is stored as `{"_truncated":true,"_original_size":N}`, and `Logs` keep at most 31 lines of up to 1 KB (16 KB in all) plus a `[truncated N more lines]` line. The order itself is never refused for this. See `## limits`.
+`Reason` and `Logs` are forwarded to the backtester engine and persisted alongside the order. Use them — they are returned by the orders endpoint/tool so a run can be reviewed and explained after the fact. They are capped exactly as live telemetry is: a `Reason` over 4 KB is stored as `{"_truncated":true,"_original_size":N}`, and `Logs` keep at most 31 lines of up to 1 KB (16 KB in all) plus a `[truncated N more lines]` line. The order itself is never refused for this. See `## limits`. A NaN or infinite number in `Reason` (an indicator still warming up) is sent as null with one warning per key (dev_sdk >= v1.9.2); older versions refused the whole order, because JSON has no NaN.
 
 ### fill semantics in backtest
 
@@ -298,6 +298,17 @@ err := s.SetLeverage(ctx, "binance_futures", "BTC/USDT", 5)
 positions, err := s.GetPositions(ctx, "binance_futures") // empty exchange = all wallets
 margin, err := s.GetMargin(ctx, "binance_futures", "USDT")  // dev_sdk >= v1.9.0
 orders, err := s.PlaceBracket(ctx, &types.BracketRequest{...})
+```
+
+When one leg of a bracket fills, the other is cancelled for you (by the engine in a
+backtest, by the SDK live). Cancelling it yourself afterwards finds nothing open:
+from dev_sdk v1.9.2 `CancelOrder` returns an error wrapping `types.ErrOrderClosed`,
+which is an answer, not a failure:
+
+```go
+if err := s.CancelOrder(ctx, ex, sym, id); err != nil && !errors.Is(err, types.ErrOrderClosed) {
+    log.Printf("cancel %s: %v", id, err)
+}
 ```
 
 - **`SetLeverage`** is refused while a position is open, on both the simulator and

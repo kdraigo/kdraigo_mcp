@@ -440,12 +440,12 @@ func addWorkspaceRun(s *server.MCPServer, d Deps) {
 		mcp.WithDescription("Build a workspace and run it on a sandbox machine: the strategy opens its backtest session with a key minted for this run alone (revoked when it ends). "+
 			"Waits up to `wait` seconds; a run still going returns its id for workspace_run_status. The result names the backtest sessions the run made: pass one to get_session_report. "+
 			"`env` sets your own variables (upper-case names, not KDRAIGO_*), e.g. {\"STRATEGY_RISK\":\"0.02\"}. "+
-			"`smoke` (dev_sdk v1.9.0 and later) first runs the window's first 7 days and starts the full run only if that exits cleanly: a panic or a refused order shows in seconds. "+
+			"`smoke` (dev_sdk v1.9.0 and later) first runs the window's first 7 days and starts the full run only if that exits cleanly: a panic or a refused order shows in seconds. With `variants`, the first variant runs those 7 days, then the whole sweep. "+
 			"`variants` makes it a sweep: 2 or more settings, each over `env`, run one after another on one build; the result is one table comparing them (return, drawdown, trades, win rate, PF, fees). "+
 			"Each variant counts as a run toward the day's runs, and all share the run's time."),
 		mcp.WithString("workspace_id", mcp.Required(), mcp.Description("Workspace UUID")),
 		mcp.WithObject("env", mcp.Description("Environment variables for the strategy, name → value")),
-		mcp.WithBoolean("smoke", mcp.Description("Run the first 7 days first, then the full run if that passed (dev_sdk v1.9.0 and later)")),
+		mcp.WithBoolean("smoke", mcp.Description("Run the first 7 days first, then the full run (or the sweep: its first variant) if that passed (dev_sdk v1.9.0 and later)")),
 		mcp.WithArray("variants", mcp.Description("A sweep: 2 or more objects of settings (name → value), e.g. [{\"STOP_ATR\":\"1.5\"},{\"STOP_ATR\":\"2\"}]; at most 10 (verified), 20 (pro), 50 (admin)"),
 			mcp.Items(map[string]any{"type": "object"})),
 		mcp.WithNumber("wait", mcp.Description("Seconds to wait for the run to end, at most 170 (60 on the hosted server)"), mcp.DefaultNumber(defaultRunWait.Seconds())),
