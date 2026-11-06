@@ -4,7 +4,7 @@ Model Context Protocol server for the [kdraigo](https://kdraigo.com) algorithmic
 
 Two ways to use it:
 
-- **Hosted** at `https://mcp.kdraigo.com/mcp`: add that URL to claude.ai, ChatGPT, Gemini CLI or Claude Code as a remote MCP server, sign in with your wallet on kdraigo.com, and nothing runs on your machine. See [Hosted server](#hosted-server).
+- **Hosted** at `https://mcp.kdraigo.com/mcp`: add that URL to claude.ai, ChatGPT, Gemini CLI or Claude Code as a remote MCP server, sign in on kdraigo.com (Google or wallet), and nothing runs on your machine. See [Hosted server](#hosted-server).
 - **Local**, over **stdio**: the binary is launched as a subprocess by your MCP client. No hosting, no port, no public surface. It signs each outbound request to `kdraigo.com` with your Ed25519 key.
 
 ---
@@ -26,7 +26,7 @@ kdraigo-mcp version
 
 ## Configure
 
-You need an Ed25519 API key registered with `users_service`. Use the kdraigo dashboard or the `users_service/cmd/test_client` helper to get a `key_id` (UUID) and a hex-encoded `private_key`.
+You need an Ed25519 API key: create one on kdraigo.com under Account → API keys ([kdraigo.com/account/api-keys](https://kdraigo.com/account/api-keys)). It gives a `key_id` (UUID) and a hex-encoded `private_key`, shown once.
 
 Create `~/.kdraigo/config.yaml`:
 
