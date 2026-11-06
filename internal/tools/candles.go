@@ -17,6 +17,7 @@ import (
 func RegisterCandles(s *server.MCPServer, d Deps) {
 	addDataCoverage(s, d)
 	addFlow(s, d)
+	addPositioning(s, d)
 	tool := mcp.NewTool("get_candles",
 		mcp.WithDescription("Fetch OHLCV candles from data_provider. Public endpoint, no auth required. At most 50,000 bars per call (about a month of 1m): for longer ranges, use a larger timeframe or split the range into several calls."),
 		mcp.WithString("exchange", mcp.Required(), mcp.Description("Exchange ID, e.g. binance or bybit")),
@@ -98,6 +99,43 @@ func addFlow(s *server.MCPServer, d Deps) {
 		}
 		if status < 200 || status >= 300 {
 			return toolErr(httpErr("get_flow", status, body)), nil
+		}
+		return toolText(string(body)), nil
+	})
+}
+
+// addPositioning adds get_positioning: futures open interest and long/short
+// ratios from data_provider (/api/v1/positioning).
+func addPositioning(s *server.MCPServer, d Deps) {
+	tool := mcp.NewTool("get_positioning",
+		mcp.WithDescription("Fetch futures positioning per bar from data_provider: open interest and who is long, for the perpetuals on binance_futures and bybit_futures. Public endpoint, no auth required. "+
+			"Built from the venues' 5-minute periods, history back to 2020-09 (or the listing). Each bar has open_interest (base units, one side, comparable across venues), "+
+			"open_interest_value (quote; Binance only), long_short_ratio and long_account_share (all accounts long vs short), top_account_ratio and top_position_ratio "+
+			"(the top 20 % of accounts by margin, counted by account and by position size; Binance only), taker_buy_sell_ratio (taker buy over sell volume; Binance only; "+
+			"geometric mean over the bar) and periods (5-minute periods in the bar). Snapshot fields are the bar's last value; 0 = not published by the venue. "+
+			"Timeframe 5m or longer. At most 50,000 bars per call."),
+		mcp.WithString("exchange", mcp.Required(), mcp.Description("binance_futures or bybit_futures")),
+		mcp.WithString("symbol", mcp.Required(), mcp.Description("Symbol, slash form e.g. BTC/USDT")),
+		mcp.WithString("timeframe", mcp.Required(), mcp.Description("Timeframe, 5m or longer: 5m, 15m, 30m, 1h, 2h, 4h, 1d, 1w, 1M.")),
+		mcp.WithString("from", mcp.Required(), mcp.Description("Start time as Unix epoch MILLISECONDS. Not seconds, not ISO 8601.")),
+		mcp.WithString("to", mcp.Required(), mcp.Description("End time as Unix epoch MILLISECONDS. Not seconds, not ISO 8601.")),
+		readOnly(),
+	)
+	add(s, tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		q := url.Values{}
+		for _, name := range []string{"exchange", "symbol", "timeframe", "from", "to"} {
+			v, err := req.RequireString(name)
+			if err != nil {
+				return toolErr(err), nil
+			}
+			q.Set(name, v)
+		}
+		body, status, err := d.HTTP.Do(ctx, false, client.HeaderStyleStandard, http.MethodGet, client.Data, "/api/v1/positioning", q, nil)
+		if err != nil {
+			return toolErr(err), nil
+		}
+		if status < 200 || status >= 300 {
+			return toolErr(httpErr("get_positioning", status, body)), nil
 		}
 		return toolText(string(body)), nil
 	})
