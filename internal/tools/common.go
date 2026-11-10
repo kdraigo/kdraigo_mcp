@@ -18,6 +18,8 @@ type Deps struct {
 	// maxWait. The hosted server waits less: a call held for minutes is
 	// what an AI app's connector is likeliest to cut.
 	WaitCap time.Duration
+	// Version is this server's release, for get_started; empty is unknown.
+	Version string
 }
 
 func toolErr(err error) *mcp.CallToolResult {

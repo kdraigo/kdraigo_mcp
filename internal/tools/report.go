@@ -59,6 +59,9 @@ type reportInputs struct {
 	detailErr error
 	days      []seriesPoint
 	daysErr   error
+	// sig is the significance of the daily returns; nil from an
+	// analytics_service without it, which the report does not mention.
+	sig *significanceResponse
 	// openErr says which open positions have no price (at the end, or now
 	// for a live session).
 	openErr error
@@ -83,6 +86,13 @@ func (d Deps) fetchReport(ctx context.Context, id, kind string) *reportInputs {
 			}
 		})
 	}
+	wg.Go(func() {
+		var sig significanceResponse
+		q := url.Values{"session_id": {id}, "session_type": {kind}}
+		if d.getResearch(ctx, "significance", "/api/v1/dev/analytics/significance", q, &sig) == nil {
+			in.sig = &sig
+		}
+	})
 	wg.Go(func() {
 		q := url.Values{
 			"session_id": {id}, "session_type": {kind}, "type": {"equity"}, "timeframe": {"1d"},
@@ -157,6 +167,11 @@ func renderReport(in *reportInputs) string {
 	if p.ReportVersion >= 2 {
 		renderResearch(doc, p)
 	}
+	if in.sig != nil {
+		for _, l := range significanceLines(in.sig) {
+			doc.Line("%s", l)
+		}
+	}
 
 	warnings := reportWarnings(in)
 	if p.ReportVersion >= 2 {
@@ -195,6 +210,8 @@ func renderReport(in *reportInputs) string {
 	default:
 		renderMonths(doc, in.days, p.InitialCapital)
 	}
+	doc.Blank()
+	doc.Line("Next: validate_strategy session_id=%s trials=<variants tried> (Monte Carlo drawdown range, significance, luck from the search) · get_trades sort=net (the trades that carry it).", p.SessionID)
 	return doc.String()
 }
 

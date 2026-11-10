@@ -28,8 +28,12 @@ func RegisterHosted(s *server.MCPServer, d Deps) {
 		d.WaitCap = HostedWaitCap
 	}
 	RegisterDocs(s)
+	RegisterGuide(s)
+	RegisterPrompts(s)
+	RegisterStart(s, d)
 	RegisterSessions(s, d)
 	RegisterAnalytics(s, d)
+	RegisterValidation(s, d)
 	RegisterCandles(s, d)
 	RegisterWorkspace(s, d)
 	RegisterResearch(s, d)
@@ -41,10 +45,14 @@ func RegisterHosted(s *server.MCPServer, d Deps) {
 
 func Register(s *server.MCPServer, d Deps) {
 	RegisterDocs(s)
+	RegisterGuide(s)
+	RegisterPrompts(s)
+	RegisterStart(s, d)
 	RegisterScaffold(s)
 	RegisterVault(s, d)
 	RegisterSessions(s, d)
 	RegisterAnalytics(s, d)
+	RegisterValidation(s, d)
 	RegisterCandles(s, d)
 	RegisterWorkspace(s, d)
 	RegisterResearch(s, d)

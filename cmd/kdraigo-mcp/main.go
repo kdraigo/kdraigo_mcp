@@ -72,9 +72,9 @@ func main() {
 		os.Exit(1)
 	}
 	httpClient := client.NewHTTP(cfg.Endpoint, cfg.BacktesterEndpoint, signer)
-	deps := tools.Deps{HTTP: httpClient}
+	deps := tools.Deps{HTTP: httpClient, Version: resolveVersion()}
 
-	s := server.NewMCPServer("kdraigo", resolveVersion())
+	s := server.NewMCPServer("kdraigo", resolveVersion(), server.WithInstructions(tools.Instructions(false)))
 	tools.Register(s, deps)
 
 	if err := server.ServeStdio(s); err != nil {

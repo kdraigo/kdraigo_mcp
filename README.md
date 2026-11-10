@@ -61,6 +61,12 @@ Restart the client. The tools below appear under the `kdraigo` server: 78 by def
 
 The two replay tools, `create_backtest_session` and `run_backtest_stream`, are off unless the server runs with `KDRAIGO_MCP_ENABLE_REPLAY=1`. They step candles through a session without running any strategy code, so they are not how a strategy is backtested. A strategy runs as its own program through dev_sdk: locally with `go run .`, or in the cloud workspace with `workspace_run`. A replay left parked also holds one of the account's session slots for up to an hour.
 
+## Prompts
+
+Clients that show MCP prompts (Claude Code lists them as slash commands) offer the platform's workflows ready to run: `get_started`, `continue_research`, `new_strategy_idea`, `validate_strategy`, `check_my_bots` and `build_a_desk`. Each says what to call and what to leave for you to agree to.
+
+Both servers send short instructions at connection (who the server is and ten rules) and point to `get_guide` for the rest, because clients cut long instructions.
+
 ## Install the skills
 
 ```bash
@@ -70,7 +76,7 @@ kdraigo-mcp install-skill --project <dir>    # <dir>/.claude/skills/<name>/SKILL
 
 The skills are built into the binary, so they always match its tools. Restart Claude Code to load them. Releases before v1.1.0 wrote flat `~/.claude/skills/<name>.md` files that Claude Code never loaded; the installer names any it finds so you can delete them.
 
-- [`kdraigo-strategy`](skills/kdraigo-strategy.md) — open the research lab → write the hypothesis → check what was already done → run (`go run .` or the cloud workspace) → report → drill down → record → hand off, how to judge a result, and the pitfalls.
+- [`kdraigo-strategy`](skills/kdraigo-strategy.md) — what the platform can do, open the research lab → write the hypothesis → check what was already done → run (`go run .` or the cloud workspace) → report → drill down → record → hand off, how to judge a result, and the pitfalls.
 - [`kdraigo-indicators`](skills/kdraigo-indicators.md) — choose the right technical indicator by intent and wire it via the SDK.
 
 ---
@@ -81,10 +87,15 @@ Results come back as a few header lines and tab-separated tables, with no JSON, 
 
 | Tool | What it does |
 | ---- | ------------ |
+| `get_started` | Start here: the account's plan and limits (pairs and bars per backtest, sweep size, runs a day) and today's use, what it already has (labs, workspaces, live bots, boards, scripts, alerts, the latest backtest), the market data held, and which tool each kind of task starts with. |
+| `get_guide` | How to work on kdraigo, one topic at a time (`loop`, `workspace`, `labs`, `judging`, `validation`, `live`, `boards`, `scripts`, `pitfalls`, …): the `kdraigo-strategy` skill served in parts. No topic lists them. |
 | `get_sdk_docs` | Returns the embedded dev_sdk reference. Pass `section` to scope. |
 | `get_indicator_docs` | Deep per-indicator reference (purpose, calculation, signals, usage). Pass `name` to scope to one indicator or category. |
 | `scaffold_strategy` | `git clone`s a template from [`example_strategy`](https://github.com/kdraigo/example_strategy) into a target dir. |
 | `get_session_report` | A backtest's or live session's results in one call: return, drawdown, return/DD, P&L split, trades and win rate per side, average R with its standard error, net without the 5 best trades, losing streak, time underwater, daily Sharpe/Sortino/Calmar, a table per instrument, P&L per month, and the platform's warnings (unfinished run, missing candles, few trades, no stops, open positions, concentration). |
+| `validate_strategy` | Is the result real? A scorecard with figures, a grade and the reason per line: sample, significance (Probabilistic Sharpe, track record needed), luck from the variants tried (`trials`), Monte Carlo drawdown and the chance of ending down, concentration, market share (beta), costs. With `workspace_id` it proposes a sensitivity sweep of the strategy's declared settings. Spends no runs. |
+| `get_monte_carlo` | The session's closed trades (or days, when positions overlap) drawn again thousands of times: the range of max drawdown, return and losing streaks, the chance of each drawdown level and of ruin, where the backtest's own drawdown sits, and `risk_pct` to see another size per trade. Seeded. |
+| `get_significance` | From daily returns: Sharpe with its autocorrelation correction and a bootstrap range, the Probabilistic Sharpe Ratio and the days of record it needs (MinTRL), skew, kurtosis, CVaR, Ulcer index, beta and alpha against buy and hold, and with `trials` the Sharpe that many skill-less variants reach by chance. Works on live sessions. |
 | `get_trades` | Every trade with entry, exit, net, initial stop and R; filter, sort by net or R, or `save_to` a CSV. Needs analytics_service with report version 2. |
 | `get_breakdown` | Trades grouped by period, instrument, side, exit kind, holding time, weekday or hour, each group with win rate, net, profit factor and R. |
 | `list_sessions` | The caller's backtest sessions, newest first, with status and progress. |

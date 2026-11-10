@@ -3,12 +3,10 @@ package main
 import (
 	"context"
 	"errors"
-	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -17,18 +15,7 @@ import (
 	"github.com/kdraigo/kdraigo_mcp/internal/client"
 	"github.com/kdraigo/kdraigo_mcp/internal/hosted"
 	"github.com/kdraigo/kdraigo_mcp/internal/tools"
-	"github.com/kdraigo/kdraigo_mcp/skills"
 )
-
-// hostedPreface opens the instructions a web client gets: claude.ai and
-// ChatGPT do not load skill files, so the workflow travels with the server.
-const hostedPreface = `This is the hosted kdraigo MCP server. Strategies are written, built and run in the user's
-cloud workspace with the workspace_* tools; there is no local mode here (no scaffold_strategy, no
-go run). Results are read with the session tools. What earlier sessions did is kept in the user's
-research labs (lab_* and experiment_* tools): open the lab first. The guide below is the
-kdraigo-strategy skill.
-
-`
 
 // serve runs the hosted remote MCP server:
 //
@@ -54,9 +41,9 @@ func serve(args []string) error {
 	// Each account's tool calls are limited here, with a message the agent
 	// can act on; the gateway's limits are the coarse layer in front.
 	limiter := hosted.NewLimiter(cfg.Limits, tools.IsLong, logger)
-	s := server.NewMCPServer("kdraigo", resolveVersion(), server.WithInstructions(hostedInstructions()),
+	s := server.NewMCPServer("kdraigo", resolveVersion(), server.WithInstructions(tools.Instructions(true)),
 		server.WithToolHandlerMiddleware(limiter.Middleware))
-	tools.RegisterHosted(s, tools.Deps{HTTP: httpClient})
+	tools.RegisterHosted(s, tools.Deps{HTTP: httpClient, Version: resolveVersion()})
 	// Stateless: each request stands alone and is authorized on its own; no
 	// session outlives its request.
 	mcpHandler := server.NewStreamableHTTPServer(s, server.WithStateLess(true))
@@ -89,20 +76,4 @@ func envOr(name, def string) string {
 		return v
 	}
 	return def
-}
-
-// hostedInstructions is the preface and the strategy skill without its front
-// matter.
-func hostedInstructions() string {
-	b, err := fs.ReadFile(skills.FS, "kdraigo-strategy.md")
-	if err != nil {
-		return strings.TrimSpace(hostedPreface)
-	}
-	body := string(b)
-	if strings.HasPrefix(body, "---") {
-		if i := strings.Index(body[3:], "\n---"); i >= 0 {
-			body = body[3+i+4:]
-		}
-	}
-	return hostedPreface + strings.TrimSpace(body)
 }
