@@ -235,6 +235,26 @@ The resolved fill policy, gap-fill setting and both fees are stored on the sessi
 row, so any stored result can be read back together with the assumptions that
 produced it.
 
+**Slippage and fee stress (dev_sdk v1.10.0 and later).** `SlippageBps` worsens every
+taker fill (a market order, a triggered stop) by that many basis points against its
+side: a buy pays more, a sell gets less; limit fills keep their price, as they keep
+the maker fee. `FeeMult` scales every resolved fee, defaults included:
+
+```go
+Simulation: &types.SimulationOptions{
+    SlippageBps: ptr(5.0), // 5 bp on every market and stop fill
+    FeeMult:     ptr(2.0), // double every fee
+},
+```
+
+The platform can set the same over your config without a code change: the
+environment variables `KDRAIGO_SIM_SLIPPAGE_BPS`, `KDRAIGO_SIM_FEE_MULT` and
+`KDRAIGO_SIM_FUNDING=off` apply over `Backtest.Simulation`, and the run log names
+them (`Backtest Engine: stress …`). In the cloud workspace `workspace_run
+stress=standard` runs the strategy as is, at fees ×1.5 and ×2, with 5 and 10 bp of
+slippage, and without funding: six variants on one build. Locally, set the variables
+before `go run .`.
+
 ### Short positions
 
 On a **spot** wallet the backtest simulates shorts: a `SELL` exceeding your current
