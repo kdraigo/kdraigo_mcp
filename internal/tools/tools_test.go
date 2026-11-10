@@ -599,6 +599,7 @@ func TestDataCoverage(t *testing.T) {
 			_, _ = w.Write([]byte(`{"binance":{"symbols":{"BTCUSDT":{"start":1740787200000,"end":1793050380000},"ETHUSDT":{"start":1740787200000,"end":1793050380000}}},` +
 				`"binance_futures":{"symbols":{"BTCUSDT":{"start":1704067200000,"end":1793050380000}}}}`))
 		},
+		"/data/api/v1/instruments": func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(`{}`)) },
 	})
 	out, isErr := call(t, s, "get_data_coverage", map[string]any{"symbol": "BTC/USDT"})
 	require.False(t, isErr, out)
@@ -608,4 +609,57 @@ func TestDataCoverage(t *testing.T) {
 
 	out, _ = call(t, s, "get_data_coverage", map[string]any{"exchange": "kraken"})
 	assert.Contains(t, out, "No history")
+}
+
+// Each market says what it is, and the class filter keeps TradFi in or out.
+func TestDataCoverage_NamesAndClass(t *testing.T) {
+	s := backend(t, map[string]http.HandlerFunc{
+		"/data/api/v1/metadata": func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(`{"binance":{"symbols":{"BTCUSDT":{"start":1740787200000,"end":1793050380000},"SKUUBUSDT":{"start":1793145600000,"end":1793050380000}}},` +
+				`"binance_futures":{"symbols":{"XAUUSDT":{"start":1765440300000,"end":1793050380000},"SOXSUSDT":{"start":1784163900000,"end":1793050380000}}}}`))
+		},
+		"/data/api/v1/instruments": func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Query().Get("exchange") {
+			case "binance":
+				_, _ = w.Write([]byte(`{"BTCUSDT":{"tick_size":"0.01","name":"Bitcoin","class":"crypto","underlying":"BTC"},` +
+					`"SKUUBUSDT":{"name":"GraniteShares 2x Long SK Hynix Daily ETF","class":"etf","underlying":"SKUU","leverage":2}}`))
+			case "binance_futures":
+				_, _ = w.Write([]byte(`{"XAUUSDT":{"tick_size":"0.01","name":"Gold","class":"commodity","underlying":"XAU"},` +
+					`"SOXSUSDT":{"name":"Direxion Daily Semiconductor Bear 3X Shares","class":"etf","underlying":"SOXS","leverage":-3}}`))
+			}
+		},
+	})
+	out, isErr := call(t, s, "get_data_coverage", nil)
+	require.False(t, isErr, out)
+	assert.Contains(t, out, "exchange\tsymbol\tfirst_bar\tlast_bar\tdays\tclass\tname")
+	assert.Contains(t, out, "\tcrypto\tBitcoin")
+	assert.Contains(t, out, "\tetf\tGraniteShares 2x Long SK Hynix Daily ETF [+2x]")
+	assert.Contains(t, out, "\tetf\tDirexion Daily Semiconductor Bear 3X Shares [-3x]")
+	assert.Contains(t, out, "\tcommodity\tGold")
+
+	out, _ = call(t, s, "get_data_coverage", map[string]any{"class": "tradfi"})
+	assert.NotContains(t, out, "BTCUSDT")
+	assert.Contains(t, out, "SKUUBUSDT")
+	assert.Contains(t, out, "XAUUSDT")
+
+	out, _ = call(t, s, "get_data_coverage", map[string]any{"class": "commodity", "exchange": "binance_futures"})
+	assert.Contains(t, out, "market history (1)")
+	assert.Contains(t, out, "XAUUSDT")
+}
+
+// A catalogue that cannot be read leaves names blank, says so, and the
+// history still answers.
+func TestDataCoverage_CatalogueDown(t *testing.T) {
+	s := backend(t, map[string]http.HandlerFunc{
+		"/data/api/v1/metadata": func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(`{"binance":{"symbols":{"BTCUSDT":{"start":1740787200000,"end":1793050380000}}}}`))
+		},
+		"/data/api/v1/instruments": func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusBadGateway)
+		},
+	})
+	out, isErr := call(t, s, "get_data_coverage", nil)
+	require.False(t, isErr, out)
+	assert.Contains(t, out, "Class and name unavailable right now for: binance.")
+	assert.Contains(t, out, "binance\tBTCUSDT\t2025-03-01\t")
 }
