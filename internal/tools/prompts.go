@@ -65,6 +65,7 @@ var workflows = []workflow{
 			{"session_id", "The backtest session", true},
 			{"trials", "How many variants or versions were tried to find it", false},
 			{"workspace_id", "Its cloud workspace, for a sensitivity sweep of its settings", false},
+			{"run_id", "The sweep it came from, to measure overfitting", false},
 		},
 		text: func(a map[string]string) string {
 			var b strings.Builder
@@ -76,6 +77,9 @@ var workflows = []workflow{
 			}
 			if a["workspace_id"] != "" {
 				fmt.Fprintf(&b, " and workspace_id=%s", a["workspace_id"])
+			}
+			if a["run_id"] != "" {
+				fmt.Fprintf(&b, " and run_id=%s (then get_overfitting_report run_id=%s for the folds and the grid)", a["run_id"], a["run_id"])
 			}
 			b.WriteString(". Explain every weak and caution line in plain words, with its figures. Give the drawdown to plan for (the Monte Carlo p95, not the backtest's own). " +
 				"Say what would make the result convincing, and propose the sensitivity sweep if there is one, but don't run it until I agree.")

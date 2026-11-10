@@ -59,7 +59,7 @@ var startIntents = [][2]string{
 	{"Write and backtest a strategy", "get_guide topic=workspace, workspace_create, workspace_write_file, workspace_run"},
 	{"Read a backtest's results", "get_session_report, then get_trades / get_breakdown"},
 	{"Is this result real?", "validate_strategy trials=N (Monte Carlo, significance, luck from the search)"},
-	{"Compare settings", "workspace_run variants=[…] (a sweep), then validate the median variant, not the best"},
+	{"Compare settings", "workspace_run variants=[…] (a sweep), then get_overfitting_report run_id=… (PBO, deflated Sharpe, walk-forward, sensitivity)"},
 	{"How deep can the drawdown get / what if I risk less?", "get_monte_carlo (dd_pct=…, risk_pct=…)"},
 	{"How are my live bots doing?", "list_live_sessions, get_live_session, get_session_report session_type=live"},
 	{"A desk of charts and data", "widget_types, board_create, widget_add"},

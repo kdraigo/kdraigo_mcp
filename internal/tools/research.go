@@ -89,6 +89,12 @@ type (
 		DerivedFrom  *string         `json:"derived_from"`
 		Version      int64           `json:"version"`
 		UpdatedAt    time.Time       `json:"updated_at"`
+		// Counted by research_service from the lab's runs: distinct runs
+		// filed under it, and the lab's runs over its hold-out (before it was
+		// registered). Nil from a research_service without them.
+		Trials           *int `json:"trials"`
+		HoldoutRuns      *int `json:"holdout_runs"`
+		HoldoutRunsEarly *int `json:"holdout_runs_before_register"`
 	}
 	labRun struct {
 		ID             string            `json:"id"`
@@ -296,10 +302,11 @@ func renderOpened(o *labOpened) string {
 	if len(o.Open) > 0 {
 		rows := make([][]string, 0, len(o.Open))
 		for _, e := range o.Open {
-			rows = append(rows, []string{e.Slug, e.Status, render.Clip(e.Title, 60), render.Clip(oneLine(e.Hypothesis), 100)})
+			rows = append(rows, []string{e.Slug, e.Status, trialsText(e), holdoutText(e), render.Clip(e.Title, 60), render.Clip(oneLine(e.Hypothesis), 100)})
 		}
 		doc.Blank()
-		doc.Table("Open experiments", []string{"experiment", "status", "title", "hypothesis"}, rows, nil)
+		doc.Table("Open experiments (trials: distinct runs filed; hold-out: runs over its hold-out window, early = before registering)",
+			[]string{"experiment", "status", "trials", "hold-out", "title", "hypothesis"}, rows, nil)
 	}
 	if len(o.Decided) > 0 {
 		rows := make([][]string, 0, len(o.Decided))
@@ -312,10 +319,10 @@ func renderOpened(o *labOpened) string {
 			if e.RegisteredAt == nil {
 				reg = "never registered"
 			}
-			rows = append(rows, []string{e.Slug, e.Status, when, reg, render.Clip(oneLine(e.Verdict), 140)})
+			rows = append(rows, []string{e.Slug, e.Status, when, reg, trialsText(e), render.Clip(oneLine(e.Verdict), 140)})
 		}
 		doc.Blank()
-		doc.Table("Decided, newest first (null and failed are dead ends: don't repeat them)", []string{"experiment", "verdict", "decided", "protocol", "finding"}, rows, nil)
+		doc.Table("Decided, newest first (null and failed are dead ends: don't repeat them)", []string{"experiment", "verdict", "decided", "protocol", "trials", "finding"}, rows, nil)
 	}
 	if len(o.Runs) > 0 {
 		doc.Blank()
@@ -1020,4 +1027,24 @@ func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
 // stripMarks drops the <b> tags Postgres puts around matched words.
 func stripMarks(s string) string {
 	return strings.NewReplacer("<b>", "", "</b>", "").Replace(s)
+}
+
+// trialsText is an experiment's trial count, or a dash from an older server.
+func trialsText(e experiment) string {
+	if e.Trials == nil {
+		return render.Dash
+	}
+	return render.Int(*e.Trials)
+}
+
+// holdoutText is the runs over an experiment's hold-out, and how many came
+// before it was registered.
+func holdoutText(e experiment) string {
+	switch {
+	case e.HoldoutRuns == nil:
+		return render.Dash
+	case e.HoldoutRunsEarly != nil && *e.HoldoutRunsEarly > 0:
+		return fmt.Sprintf("%d (%d early)", *e.HoldoutRuns, *e.HoldoutRunsEarly)
+	}
+	return render.Int(*e.HoldoutRuns)
 }

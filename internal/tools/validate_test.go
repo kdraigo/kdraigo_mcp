@@ -158,7 +158,7 @@ func TestValidateStrategy_ThinSession(t *testing.T) {
 	assert.Contains(t, text, "at least 20 closed trades")
 	assert.Contains(t, text, "costs\tweak\tgross -3.00\tno edge before costs")
 	assert.Contains(t, text, "concentration\tweak")
-	assert.Contains(t, text, "Next: give workspace_id")
+	assert.Contains(t, text, "Next: give run_id")
 }
 
 func TestReportCarriesSignificance(t *testing.T) {

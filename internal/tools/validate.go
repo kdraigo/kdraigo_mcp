@@ -424,12 +424,15 @@ func addValidateStrategy(s *server.MCPServer, d Deps) {
 		mcp.WithDescription("Is this backtest result real? One call runs the checks a professional would and gives a scorecard, each line with its figures, a grade (ok / caution / weak) and why: "+
 			"sample size, statistical significance (Probabilistic Sharpe Ratio, track record needed, the Sharpe the variants tried reach by chance), Monte Carlo drawdown and the chance of ending down, "+
 			"how much rests on a few trades or one instrument, whether it is mostly the market (beta), and costs. "+
-			"Overfitting across settings (PBO, walk-forward, parameter sensitivity) needs a sweep: with workspace_id it proposes the variants to run with workspace_run. "+
+			"Overfitting across settings needs a sweep: give run_id (or lab + experiment) for PBO, the deflated Sharpe, walk-forward and sensitivity, or workspace_id for the sweep to run. "+
 			"Run it before calling a result an edge, before experiment_decide, and before a strategy goes live. It spends no runs."),
 		mcp.WithString("session_id", mcp.Required(), mcp.Description("Session UUID")),
 		mcp.WithString("session_type", mcp.Description("Session type"), mcp.DefaultString("backtest"), mcp.Enum("backtest", "live")),
 		mcp.WithNumber("trials", mcp.Description("Variants, settings or ideas tried to find this one (sweep variants plus earlier attempts); be honest, more is safer")),
 		mcp.WithString("workspace_id", mcp.Description("The strategy's cloud workspace: proposes a sensitivity sweep of its declared settings")),
+		mcp.WithString("run_id", mcp.Description("The sweep the session came from (workspace_run with variants; up to 5 comma-separated): fills the overfitting line with PBO, the deflated Sharpe, walk-forward and sensitivity")),
+		mcp.WithString("lab", mcp.Description("With experiment: the lab")),
+		mcp.WithString("experiment", mcp.Description("With lab: the experiment the session belongs to; its runs are the sweep, its count the trials")),
 		mcp.WithString("sweep_params", mcp.Description("Comma-separated settings to vary in the proposed sweep; default the first three numeric ones")),
 		mcp.WithNumber("max_variants", mcp.Description("Most variants to propose (your account's sweep cap: 10 verified, 20 pro); default 10")),
 		readOnly(),
@@ -440,6 +443,14 @@ func addValidateStrategy(s *server.MCPServer, d Deps) {
 			return toolErr(err), nil
 		}
 		trials := int(req.GetFloat("trials", 0))
+		// The sweep first: its count is the trials when none were given.
+		var ovf *overfitResponse
+		var ovfErr error
+		if hasSweep(req) {
+			if ovf, _, ovfErr = d.analyseSweep(ctx, req); ovfErr == nil && trials == 0 && ovf.DSR != nil {
+				trials = ovf.DSR.Trials
+			}
+		}
 		var (
 			wg               sync.WaitGroup
 			perf             performanceReport
@@ -474,6 +485,16 @@ func addValidateStrategy(s *server.MCPServer, d Deps) {
 		}
 		doc := render.New()
 		lines := scorecard(&perf, &sig, sigErr, &mc, mcErr, trials)
+		if last := len(lines) - 1; ovf != nil {
+			lines[last] = sweepLine(ovf)
+			for _, v := range ovf.Variants {
+				if v.ID == q.Get("session_id") {
+					lines[last].figures += fmt.Sprintf(" · this session ranks %d of %d", v.Rank, len(ovf.Variants))
+				}
+			}
+		} else if ovfErr != nil {
+			lines[last].why = ovfErr.Error()
+		}
 		doc.Line("Validation of session %s (%s). Grades are conventions, named on each line; read the figures, not just the grade.", q.Get("session_id"), q.Get("session_type"))
 		highWarnings(doc, perf.Warnings)
 		rows := make([][]string, 0, len(lines))
@@ -491,8 +512,12 @@ func addValidateStrategy(s *server.MCPServer, d Deps) {
 		switch {
 		case weak > 0:
 			doc.Line("Verdict: not an edge yet: %d weak, %d caution. Fix or explain the weak lines before trusting this result.", weak, caution)
+		case caution > 0 && ovf != nil:
+			doc.Line("Verdict: promising, not proven: %d caution.", caution)
 		case caution > 0:
 			doc.Line("Verdict: promising, not proven: %d caution. Overfitting across settings is still unmeasured until a sweep is checked.", caution)
+		case ovf != nil:
+			doc.Line("Verdict: passes the checks, the sweep's included. A forward period after the model's training data is the final test.")
 		default:
 			doc.Line("Verdict: passes the single-session checks. Overfitting across settings is still unmeasured until a sweep is checked; a forward period after the model's training data is the final test.")
 		}
@@ -503,8 +528,10 @@ func addValidateStrategy(s *server.MCPServer, d Deps) {
 			} else {
 				proposeSweep(doc, params.Params, req.GetString("sweep_params", ""), int(req.GetFloat("max_variants", 10)))
 			}
+		} else if ovf == nil {
+			doc.Line("Next: give run_id (the sweep it came from) to measure overfitting, or workspace_id for a sensitivity sweep to run · get_monte_carlo risk_pct=… for another size per trade · get_trades sort=net for the trades that carry it.")
 		} else {
-			doc.Line("Next: give workspace_id to get a sensitivity sweep of the strategy's settings · get_monte_carlo risk_pct=… for another size per trade · get_trades sort=net for the trades that carry it.")
+			doc.Line("Next: get_overfitting_report with the same run_id for the folds, the grid and every variant · get_trades sort=net for the trades that carry it.")
 		}
 		return toolText(doc.String()), nil
 	})
