@@ -447,8 +447,16 @@ func addValidateStrategy(s *server.MCPServer, d Deps) {
 		var ovf *overfitResponse
 		var ovfErr error
 		if hasSweep(req) {
-			if ovf, _, ovfErr = d.analyseSweep(ctx, req); ovfErr == nil && trials == 0 && ovf.DSR != nil {
+			var sw *sweep
+			ovf, sw, ovfErr = d.analyseSweep(ctx, req)
+			switch {
+			case trials > 0:
+			case ovfErr == nil && ovf.DSR != nil:
 				trials = ovf.DSR.Trials
+			case sw != nil && sw.trials > 0:
+				// The analysis was refused (too few comparable runs), but
+				// the sweep or experiment still says how many were tried.
+				trials = sw.trials
 			}
 		}
 		var (
@@ -457,6 +465,9 @@ func addValidateStrategy(s *server.MCPServer, d Deps) {
 			sig              significanceResponse
 			mc               monteCarloResponse
 			params           workspaceParams
+			costs            costsResponse
+			entries          entriesResponse
+			costsErr, entErr error
 			perfErr, sigErr  error
 			mcErr, paramsErr error
 			wsID             = strings.TrimSpace(req.GetString("workspace_id", ""))
@@ -474,6 +485,12 @@ func addValidateStrategy(s *server.MCPServer, d Deps) {
 		wg.Go(func() {
 			mcErr = d.getValidation(ctx, "Monte Carlo", "/api/v1/dev/analytics/montecarlo", q, &mc)
 		})
+		wg.Go(func() {
+			costsErr = d.getValidation(ctx, "cost stress", "/api/v1/dev/analytics/costs", q, &costs)
+		})
+		wg.Go(func() {
+			entErr = d.getValidation(ctx, "entry edge", "/api/v1/dev/analytics/entries", q, &entries)
+		})
 		if wsID != "" {
 			wg.Go(func() {
 				paramsErr = d.getJSON(ctx, "workspace params", client.Workspace, wsPath(wsID)+"/params", nil, &params)
@@ -485,6 +502,7 @@ func addValidateStrategy(s *server.MCPServer, d Deps) {
 		}
 		doc := render.New()
 		lines := scorecard(&perf, &sig, sigErr, &mc, mcErr, trials)
+		lines = withExecution(lines, &costs, costsErr, &entries, entErr)
 		if last := len(lines) - 1; ovf != nil {
 			lines[last] = sweepLine(ovf)
 			for _, v := range ovf.Variants {
@@ -799,4 +817,59 @@ func sweepSkip(name string) bool {
 		}
 	}
 	return false
+}
+
+// withExecution grades costs by their headroom and adds the entries' edge,
+// before the overfitting line.
+func withExecution(lines []scoreLine, c *costsResponse, cErr error, e *entriesResponse, eErr error) []scoreLine {
+	if cErr == nil {
+		l := scoreLine{area: "costs"}
+		share := render.Dash
+		if c.Gross > 0 {
+			share = pct0((c.Fees + c.Funding) / c.Gross)
+		}
+		switch {
+		case c.BreakEvenSlippageBps == nil:
+			l.grade, l.figures, l.why = gradeRed, fmt.Sprintf("net %s, fees + funding %s of gross", render.Signed(c.Net, 2), share), "no headroom: net is not positive at today's costs"
+		default:
+			be := *c.BreakEvenSlippageBps
+			l.figures = fmt.Sprintf("break-even at %s bp slippage or fees ×%s · fees + funding %s of gross", render.Num(be, 1), render.Opt(c.BreakEvenFeeMult, 2), share)
+			switch {
+			case be >= 10:
+				l.grade, l.why = gradeGreen, "survives 10 bp of slippage on every fill"
+			case be >= 3:
+				l.grade, l.why = gradeAmber, "a few basis points of slippage end it (get_cost_stress)"
+			default:
+				l.grade, l.why = gradeRed, "under 3 bp of slippage ends it: the backtest has none"
+			}
+		}
+		for i := range lines {
+			if lines[i].area == "costs" {
+				lines[i] = l
+			}
+		}
+	}
+	ent := scoreLine{area: "entries", grade: gradeNone, figures: render.Dash}
+	switch {
+	case eErr != nil:
+		ent.why = eErr.Error()
+	case len(e.Horizons) > 0 && e.Horizons[0].Trades > 0:
+		h := e.Horizons[0]
+		ent.figures = fmt.Sprintf("%dd after entry: %s bp vs %s random, p %s", h.Days, render.Signed(h.MeanBps, 1), render.Signed(h.RandomMeanBps, 1), render.Num(h.PValue, 3))
+		if h.PValue < 0.05 {
+			ent.grade, ent.why = gradeGreen, "the entries catch moves random entries don't"
+		} else {
+			ent.grade, ent.why = gradeAmber, "entries no better than random: any edge is in the exits or the sizing"
+		}
+	default:
+		ent.why = "no entry has a close after it"
+	}
+	out := make([]scoreLine, 0, len(lines)+1)
+	for _, l := range lines {
+		if l.area == "overfitting" {
+			out = append(out, ent)
+		}
+		out = append(out, l)
+	}
+	return out
 }

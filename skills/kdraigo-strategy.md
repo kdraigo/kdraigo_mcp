@@ -13,11 +13,11 @@ You develop strategies on the kdraigo platform. Platform data comes through the 
 
 - **Write and backtest strategies** in Go on dev_sdk: in the cloud workspace (`workspace_*`) or locally (`go run .`). A sweep runs several settings in one call.
 - **Read results:** `get_session_report`, then `get_trades`, `get_breakdown`, `get_session_orders`, `get_analytics_series`.
-- **Check a result is real:** `validate_strategy` (a scorecard), `get_monte_carlo` (the drawdown range, another risk per trade), `get_significance` (Probabilistic Sharpe, the track record needed, the luck in the variants tried). After a sweep, `get_overfitting_report` (PBO, deflated Sharpe, walk-forward, parameter sensitivity; `get_walk_forward` and `get_parameter_sensitivity` show one part).
+- **Check a result is real:** `validate_strategy` (a scorecard), `get_monte_carlo` (the drawdown range, another risk per trade), `get_significance` (Probabilistic Sharpe, the track record needed, the luck in the variants tried). After a sweep, `get_overfitting_report` (PBO, deflated Sharpe, walk-forward, parameter sensitivity; `get_walk_forward` and `get_parameter_sensitivity` show one part). `get_cost_stress` (the break-even slippage and fees), `get_entry_edge` (entries against random ones), `get_breakdown by=vol_regime|trend_regime` (results by market regime), `compare_sessions` (did a change really help?).
 - **Keep research:** labs with experiments, pre-registered rules and verdicts (`lab_*`, `experiment_*`); a Library of published results (`library_*`); syndicates that share labs (`syndicate_*`).
 - **Market data:** candles for crypto and Binance TradFi (stocks, ETFs, metals) perpetuals and spot, trade flow, open interest and long/short ratios (`get_candles`, `get_flow`, `get_positioning`, `get_data_coverage`).
 - **Desks and indicators:** boards of widgets (`board_*`, `widget_*`), chart scripts in kdscript (`script_*`), Telegram alerts from scripts (`alert_*`).
-- **Live bots:** read only (`list_live_sessions`, `get_live_session`); the report and validation tools take `session_type=live`.
+- **Live bots:** read only (`list_live_sessions`, `get_live_session`); the report and validation tools take `session_type=live`; `get_live_cone` and `get_live_drift` hold a bot against its backtest.
 - `get_guide topic=…` returns the part of this guide a task needs.
 
 ## How a strategy runs
@@ -122,7 +122,12 @@ A backtest is one path through one window, found after some number of tries. Bef
    - **Walk-forward efficiency** is the out-of-sample pace over the in-sample one: ≥ 50% is good. It switches between the sweep's running variants; a fresh re-optimised run starts flat.
    - **Plateau** is the best setting's neighbours over the best: near 1 a plateau, under 0.4 a spike. The median over all settings is the honest estimate.
    - A robust edge degrades gently around its defaults; a spike at one value is a fit. Choose by the median and the plateau, then confirm the chosen setting alone on the test window.
-7. **Model hindsight:** an AI's training data may cover the window it tests (which coins rose, which events happened). Before money goes in, check the rule on a period after the model's training data, or register a dated forward check.
+7. **Costs, regimes and entries:**
+   - `get_cost_stress`: the slippage on every fill and the fee multiplier at which net reaches zero. Under about 3 bp of break-even slippage is an edge the backtest's perfect fills invent. Confirm it with a re-run: `workspace_run stress=standard` runs the strategy as is, at fees ×1.5 and ×2, with 5 and 10 bp slippage on every taker fill, and without funding (6 runs; dev_sdk v1.10.0 and later).
+   - `get_breakdown by=vol_regime` or `trend_regime`: which market conditions the result came from. A result from one regime is a bet on that regime.
+   - `get_entry_edge`: whether the entries catch moves random entries on the same coins don't. If not, any edge is in the exits or the sizing.
+8. **Did a change help?** `compare_sessions a=<baseline> b=<change>` tests the Sharpe difference on the same days. A p-value above 0.05 means the days can't tell them apart.
+9. **Model hindsight:** an AI's training data may cover the window it tests (which coins rose, which events happened). Before money goes in, check the rule on a period after the model's training data, or register a dated forward check.
 
 Daily figures annualise over 365 days: crypto and Binance's TradFi markets trade every day. A session without a daily mark-to-market record uses closed-trade equity, which understates volatility; the tools say when.
 
@@ -134,6 +139,7 @@ A live bot is a strategy trading real money with the user's exchange keys, on th
 - **One bot now:** `get_live_session`. It shows each open position valued at the venue's mark price, with its unrealized P&L and what protects it (the resting stop and take-profit, or "none"), plus the last orders.
 - **Results:** `get_session_report session_type=live`, then `get_trades`, `get_breakdown`, `get_analytics_series` and `get_session_orders` with the same `session_type`.
 - **Is the live record saying anything yet?** `get_significance session_type=live` gives the days of record still needed; `get_monte_carlo` on the bot's backtest gives the drawdown range to expect live.
+- **Is the bot still its backtest?** `get_live_cone live_session_id=… backtest_session_id=…` places the live record in the cone of its backtest's paths (scaled to the bot's risk per trade). Below the 5th percentile is unlikely to be bad luck: tell the user. `get_live_drift` with a backtest of the same code over the live window shows the slippage, missed and extra trades, and R live against backtest.
 - Funding is not in the live record, and the figures move while the bot trades. Say both when you compare a live bot with its backtest.
 - **Flag, don't act.** A DISCONNECTED bot or an open position with no stop is something to tell the user plainly. Stopping or changing a bot is theirs to do.
 - **An empty list may be the wrong account.** Each kdraigo account sees only its own bots, and a bot appears only once it sends telemetry.

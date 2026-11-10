@@ -246,12 +246,13 @@ func tradeCSVRow(t *trade) []string {
 	}
 }
 
-var breakdownBys = []string{"day", "week", "month", "quarter", "instrument", "side", "weekday", "hour", "exit_kind", "hold"}
+var breakdownBys = []string{"day", "week", "month", "quarter", "instrument", "side", "weekday", "hour", "exit_kind", "hold", "vol_regime", "trend_regime"}
 
 func addGetBreakdown(s *server.MCPServer, d Deps) {
 	tool := mcp.NewTool("get_breakdown",
 		mcp.WithDescription("A session's closed trades grouped, one row per group with trades, win rate, net, gross, fees, funding, profit factor and R (average, standard error, sum, trades with R), and a total. "+
 			"by: day, week (from Monday), month, quarter, instrument, side, weekday, hour (UTC), exit_kind or hold (holding time). Period groupings list every period of the window, empty ones too. "+
+			"vol_regime (low/mid/high 20-day volatility of the trade's instrument) and trend_regime (its close above or below its 50-day average), each as of the day before entry, ask which market conditions the strategy made its money in (needs the engine's daily record). "+
 			"A trade counts where it closed (at=exit) or opened (at=entry; use it to ask when entries work). "+
 			"Unlike the months in get_session_report, which follow the equity curve (a fee on the day it was charged), a group books whole trades."),
 		mcp.WithString("session_id", mcp.Required(), mcp.Description("Session UUID")),

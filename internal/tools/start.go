@@ -62,6 +62,8 @@ var startIntents = [][2]string{
 	{"Compare settings", "workspace_run variants=[…] (a sweep), then get_overfitting_report run_id=… (PBO, deflated Sharpe, walk-forward, sensitivity)"},
 	{"How deep can the drawdown get / what if I risk less?", "get_monte_carlo (dd_pct=…, risk_pct=…)"},
 	{"How are my live bots doing?", "list_live_sessions, get_live_session, get_session_report session_type=live"},
+	{"Is my live bot still its backtest?", "get_live_cone (the backtest's range of paths), get_live_drift (slippage, missed trades)"},
+	{"Did my change help?", "compare_sessions a=<baseline> b=<change> (Sharpe difference on the same days)"},
 	{"A desk of charts and data", "widget_types, board_create, widget_add"},
 	{"A custom indicator or a Telegram alert", "script_library_search, script_reference, script_save, alert_create"},
 	{"Market data", "get_data_coverage (what exists), get_candles, get_flow, get_positioning"},

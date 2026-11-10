@@ -29,7 +29,8 @@ const sid = "11111111-2222-3333-4444-555555555555"
 
 // optionalPaths are what a tool reads only to add to its answer: a test that
 // does not serve one acts as a platform without it.
-var optionalPaths = map[string]bool{"/analytics/api/v1/dev/analytics/significance": true}
+var optionalPaths = map[string]bool{"/analytics/api/v1/dev/analytics/significance": true,
+	"/analytics/api/v1/dev/analytics/costs": true, "/analytics/api/v1/dev/analytics/entries": true}
 
 // backend serves the gateway paths the tools call, each from its own handler;
 // a path with no handler fails the test.

@@ -180,7 +180,7 @@ func TestValidateStrategy_WithItsSweep(t *testing.T) {
 	text, isErr := call(t, s, "validate_strategy", map[string]any{"session_id": sid, "run_id": "run-1"})
 	require.False(t, isErr, text)
 	assert.Equal(t, "4", sigTrials, "the sweep's trials when none were given")
-	assert.Contains(t, text, "overfitting\tcaution\tPBO 0.31 · DSR 0.97 (4 trials) · WFE 64% · plateau 0.47 · median setting Sharpe 1.10 · this session ranks 3 of 3")
+	assert.Contains(t, text, "overfitting\tcaution\tPBO 0.31 · DSR 0.97 (4 trials, 3.4 effective) · WFE 64% · plateau 0.47 · median setting Sharpe 1.10 · this session ranks 3 of 3")
 	assert.Contains(t, text, "PBO: PBO 0.2–0.5")
 	assert.Contains(t, text, "Next: get_overfitting_report")
 }
@@ -214,6 +214,28 @@ func TestSweepGrades_NearCopies(t *testing.T) {
 	g = sweepGrades(&r)
 	assert.Equal(t, gradeAmber, g[0].grade)
 	assert.Contains(t, g[0].why, "rarely loses")
+}
+
+// An experiment whose runs can't be compared still gives its trials to the
+// significance check.
+func TestValidateStrategy_RefusedSweepKeepsTrials(t *testing.T) {
+	var sigTrials string
+	s := backend(t, map[string]http.HandlerFunc{
+		"/analytics/api/v1/dev/analytics/performance": jsonReply(perfFixture()),
+		"/analytics/api/v1/dev/analytics/significance": func(w http.ResponseWriter, r *http.Request) {
+			sigTrials = r.URL.Query().Get("trials")
+			jsonReply(sigFixture())(w, r)
+		},
+		"/analytics/api/v1/dev/analytics/montecarlo": jsonReply(mcFixture()),
+		"/research/api/v1/dev/labs/trend/runs": jsonReply([]map[string]any{{"id": "r1", "status": "succeeded", "session_ids": []string{sid},
+			"window_start": "2025-01-01T00:00:00Z", "window_end": "2025-07-01T00:00:00Z", "metrics": map[string]any{"sessions": 1}}}),
+		"/research/api/v1/dev/labs/trend/experiments/ema": jsonReply(map[string]any{"slug": "ema", "trials": 14}),
+	})
+	text, isErr := call(t, s, "validate_strategy", map[string]any{"session_id": sid, "lab": "trend", "experiment": "ema"})
+	require.False(t, isErr, text)
+	assert.Equal(t, "14", sigTrials)
+	assert.Contains(t, text, "a sweep analysis needs at least 2")
+	assert.Contains(t, text, "search luck\tweak\tSharpe 1.01 vs 1.74 by chance from 14 trials")
 }
 
 func TestHoldoutText(t *testing.T) {

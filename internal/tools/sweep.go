@@ -114,10 +114,40 @@ func variantSettings(v runVariant) string {
 	sort.Strings(names)
 	parts := make([]string, 0, len(names)+len(v.EnvNames))
 	for _, n := range names {
-		parts = append(parts, n+"="+v.Params[n])
+		parts = append(parts, settingText(n, v.Params[n]))
 	}
 	for _, n := range v.EnvNames {
 		parts = append(parts, n+"=(set)")
 	}
 	return strings.Join(parts, " ")
+}
+
+// standardStress is workspace_run's stress=standard: the strategy as it is,
+// then charged worse execution one way at a time.
+func standardStress() []map[string]string {
+	return []map[string]string{
+		{"KDRAIGO_SIM_FEE_MULT": "1"},
+		{"KDRAIGO_SIM_FEE_MULT": "1.5"},
+		{"KDRAIGO_SIM_FEE_MULT": "2"},
+		{"KDRAIGO_SIM_SLIPPAGE_BPS": "5"},
+		{"KDRAIGO_SIM_SLIPPAGE_BPS": "10"},
+		{"KDRAIGO_SIM_FUNDING": "off"},
+	}
+}
+
+// settingText is a setting as a sweep row shows it: a stress setting in
+// words, the rest name=value.
+func settingText(name, value string) string {
+	switch name {
+	case "KDRAIGO_SIM_FEE_MULT":
+		if value == "1" {
+			return "as is"
+		}
+		return "fees ×" + value
+	case "KDRAIGO_SIM_SLIPPAGE_BPS":
+		return "slippage " + value + "bp"
+	case "KDRAIGO_SIM_FUNDING":
+		return "funding " + value
+	}
+	return name + "=" + value
 }

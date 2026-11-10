@@ -656,7 +656,8 @@ func sweepGrades(r *overfitResponse) []scoreLine {
 		out = append(out, scoreLine{area: "PBO", grade: gradeNone, figures: render.Dash, why: r.PBOError})
 	}
 	if x := r.DSR; x != nil && x.DSR != nil {
-		l := scoreLine{area: "deflated Sharpe", figures: fmt.Sprintf("DSR %s: Sharpe %s vs %s by chance from %d trials", render.Num(*x.DSR, 3), render.Num(x.Sharpe, 2), render.Num(x.ExpectedMaxSharpe, 2), x.Trials)}
+		l := scoreLine{area: "deflated Sharpe", figures: fmt.Sprintf("DSR %s: Sharpe %s vs %s by chance from %d trials (%s effective)",
+			render.Num(*x.DSR, 3), render.Num(x.Sharpe, 2), render.Num(x.ExpectedMaxSharpe, 2), x.Trials, render.Num(x.TrialsUsed, 1))}
 		switch {
 		case *x.DSR >= 0.95:
 			l.grade, l.why = gradeGreen, "DSR ≥ 0.95 (Bailey & López de Prado)"
@@ -778,7 +779,7 @@ func sweepLine(r *overfitResponse) scoreLine {
 		figs = append(figs, "PBO "+render.Num(r.PBO.PBO, 2))
 	}
 	if r.DSR != nil && r.DSR.DSR != nil {
-		figs = append(figs, fmt.Sprintf("DSR %s (%d trials)", render.Num(*r.DSR.DSR, 2), r.DSR.Trials))
+		figs = append(figs, fmt.Sprintf("DSR %s (%d trials, %s effective)", render.Num(*r.DSR.DSR, 2), r.DSR.Trials, render.Num(r.DSR.TrialsUsed, 1)))
 	}
 	if w := r.WalkForward; w != nil && w.Efficiency != nil {
 		figs = append(figs, "WFE "+pct0(*w.Efficiency))
