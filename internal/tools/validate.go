@@ -819,21 +819,27 @@ func sweepSkip(name string) bool {
 	return false
 }
 
+// costShare says what costs took: a share of gross while gross is positive,
+// else both amounts, since a share of a loss means nothing ("—" did not say why).
+func costShare(costs, gross float64) string {
+	if gross > 0 {
+		return fmt.Sprintf("fees + funding %s of gross", pct0(costs/gross))
+	}
+	return fmt.Sprintf("gross %s, fees + funding %s", render.Signed(gross, 2), render.Num(costs, 2))
+}
+
 // withExecution grades costs by their headroom and adds the entries' edge,
 // before the overfitting line.
 func withExecution(lines []scoreLine, c *costsResponse, cErr error, e *entriesResponse, eErr error) []scoreLine {
 	if cErr == nil {
 		l := scoreLine{area: "costs"}
-		share := render.Dash
-		if c.Gross > 0 {
-			share = pct0((c.Fees + c.Funding) / c.Gross)
-		}
+		share := costShare(c.Fees+c.Funding, c.Gross)
 		switch {
 		case c.BreakEvenSlippageBps == nil:
-			l.grade, l.figures, l.why = gradeRed, fmt.Sprintf("net %s, fees + funding %s of gross", render.Signed(c.Net, 2), share), "no headroom: net is not positive at today's costs"
+			l.grade, l.figures, l.why = gradeRed, fmt.Sprintf("net %s, %s", render.Signed(c.Net, 2), share), "no headroom: net is not positive at today's costs"
 		default:
 			be := *c.BreakEvenSlippageBps
-			l.figures = fmt.Sprintf("break-even at %s bp slippage or fees ×%s · fees + funding %s of gross", render.Num(be, 1), render.Opt(c.BreakEvenFeeMult, 2), share)
+			l.figures = fmt.Sprintf("break-even at %s bp slippage or fees ×%s · %s", render.Num(be, 1), render.Opt(c.BreakEvenFeeMult, 2), share)
 			switch {
 			case be >= 10:
 				l.grade, l.why = gradeGreen, "survives 10 bp of slippage on every fill"

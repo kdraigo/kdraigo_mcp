@@ -31,7 +31,7 @@ func RegisterDocs(s *server.MCPServer) {
 		}
 		out := extractSection(sdkDocs, section)
 		if out == "" {
-			return toolErr(fmt.Errorf("section %q not found", section)), nil
+			return toolErr(fmt.Errorf("%s", sectionMiss(sdkDocs, section))), nil
 		}
 		return toolText(out), nil
 	})
@@ -99,26 +99,62 @@ func extractHeading(doc, needle string) string {
 }
 
 // extractSection returns the chunk of the document starting at the first H2 whose title
-// contains `needle` (case-insensitive) and ending at the next H2.
+// contains `needle` (case-insensitive) and ending at the next H2. With no such H2, the
+// first H3 that matches, up to the next H3 or H2.
 func extractSection(doc, needle string) string {
 	needle = strings.ToLower(needle)
 	lines := strings.Split(doc, "\n")
-	start := -1
-	for i, l := range lines {
-		if strings.HasPrefix(l, "## ") && strings.Contains(strings.ToLower(l), needle) {
-			start = i
-			break
+	for _, level := range []string{"## ", "### "} {
+		start := -1
+		for i, l := range lines {
+			if strings.HasPrefix(l, level) && strings.Contains(strings.ToLower(l), needle) {
+				start = i
+				break
+			}
+		}
+		if start < 0 {
+			continue
+		}
+		end := len(lines)
+		for i := start + 1; i < len(lines); i++ {
+			if strings.HasPrefix(lines[i], "## ") || (level == "### " && strings.HasPrefix(lines[i], "### ")) {
+				end = i
+				break
+			}
+		}
+		return strings.Join(lines[start:end], "\n")
+	}
+	return ""
+}
+
+// sectionMiss says a section was not found, which sections there are, and which of
+// them mention the word: a field like `candle` is documented inside a section (types),
+// not under its own heading.
+func sectionMiss(doc, needle string) string {
+	var all, mention []string
+	word := strings.ToLower(needle)
+	var title string
+	var body strings.Builder
+	flush := func() {
+		if title != "" && strings.Contains(strings.ToLower(body.String()), word) {
+			mention = append(mention, title)
 		}
 	}
-	if start < 0 {
-		return ""
-	}
-	end := len(lines)
-	for i := start + 1; i < len(lines); i++ {
-		if strings.HasPrefix(lines[i], "## ") {
-			end = i
-			break
+	for _, l := range strings.Split(doc, "\n") {
+		if strings.HasPrefix(l, "## ") {
+			flush()
+			title = strings.TrimSpace(strings.TrimPrefix(l, "## "))
+			all = append(all, title)
+			body.Reset()
+			continue
 		}
+		body.WriteString(l)
+		body.WriteByte('\n')
 	}
-	return strings.Join(lines[start:end], "\n")
+	flush()
+	msg := fmt.Sprintf("section %q not found. Sections: %s.", needle, strings.Join(all, ", "))
+	if len(mention) > 0 {
+		msg += fmt.Sprintf(" %q appears in: %s.", needle, strings.Join(mention, ", "))
+	}
+	return msg
 }

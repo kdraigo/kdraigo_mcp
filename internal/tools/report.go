@@ -392,8 +392,8 @@ func renderResearch(doc *render.Doc, p *performanceReport) {
 	} else {
 		doc.Line("R: no trade has an initial stop (a protective STOP_LOSS, or `stop` in the entry order's reason; the with-atr-bracket template places one with every entry)")
 	}
-	doc.Line("Without the 5 best trades net is %s (they are %s of net) · longest losing streak %d · longest underwater %s days · exposure %s · avg hold %s",
-		signedOpt(t.NetWithoutTop5, 2), optShare(t.Top5Share), t.LongestLosingStreak,
+	doc.Line("Without the 5 best trades net is %s (%s) · longest losing streak %d · longest underwater %s days · exposure %s · avg hold %s",
+		signedOpt(t.NetWithoutTop5, 2), top5Note(t.Top5Share, t.NetPnL), t.LongestLosingStreak,
 		render.Opt(t.LongestUnderwaterDays, 1), render.OptPct(t.ExposurePct, 0), holdOpt(t.AvgHoldSec))
 	months := fmt.Sprintf("%d months, %d losing", t.Months, t.LosingMonths)
 	if t.WorstMonth != nil {
@@ -440,6 +440,19 @@ func signedPctOpt(v *float64) string {
 }
 
 // optShare is a fraction as a percentage.
+// top5Note is what the 5 best trades are of net: a share only while net is
+// positive, which is when analytics computes one ("—" did not say why).
+func top5Note(share *float64, net float64) string {
+	switch {
+	case share != nil:
+		return "they are " + render.Pct(*share*100, 0) + " of net"
+	case net <= 0:
+		return "no share: net is not positive"
+	default:
+		return "they are " + render.Dash + " of net"
+	}
+}
+
 func optShare(v *float64) string {
 	if v == nil {
 		return render.Dash

@@ -177,6 +177,18 @@ code and data. Before v1.9.1 the two callbacks ran on separate goroutines, and w
 came first on a bar with a fill varied from run to run. In live trading they still
 arrive when the venue sends them, so keep shared state under a lock.
 
+Two consequences of that handover:
+
+- **An exit and a new entry can land on the same bar.** The strategy hears of a stop that
+  filled inside the bar before that bar's `OnCandle`, so it can be flat and enter again
+  on the same close.
+- **A leg you cancel in `SetOnOrderUpdate` stays live until the bar closes.** A strategy
+  that pairs a stop and a target itself and cancels the other leg on a fill leaves that
+  leg resting for up to one bar after the fill (the cancel is stamped at the bar's
+  close). Give both legs `ReduceOnly` (futures): the engine cancels a reduce-only order
+  that triggers with nothing left to reduce. Or place them with `PlaceBracket`, whose
+  legs the engine cancels against each other at the fill itself.
+
 Resting stop orders fill **intrabar**, not on the close: a SELL stop triggers on the
 bar's low, a BUY stop on its high. There is no longer any reason to simulate stops
 strategy-side, and doing so is now less accurate than placing a real one.
