@@ -91,7 +91,7 @@ func renderSessions(list []sessionSummary, limit, offset int) string {
 			tags = strings.TrimPrefix(tags+",stress: "+strings.Join(s.Stress, "+"), ",")
 		}
 		rows = append(rows, []string{
-			s.ID, render.Clip(s.Name, 40), s.Status, progress,
+			s.ID, render.ClipName(s.Name, 40), s.Status, progress,
 			exchanges(s.Exchange, s.Exchanges), s.Pair, s.Timeframe, render.Time(s.CreatedAt), tags,
 		})
 	}

@@ -312,7 +312,7 @@ func TestWorkspaceRun_AlreadyRunning(t *testing.T) {
 	})
 	out, isErr := call(t, s, "workspace_run", map[string]any{"workspace_id": wsID, "wait": 0})
 	require.False(t, isErr, out)
-	assert.Contains(t, out, "Already going: this run was started before")
+	assert.Contains(t, out, "Already going: this run was started a few minutes ago with the same files and settings")
 }
 
 // It still says so after following the run to its end: the status reads
@@ -328,30 +328,57 @@ func TestWorkspaceRun_AlreadyRunningAfterWaiting(t *testing.T) {
 	out, isErr := call(t, s, "workspace_run", map[string]any{"workspace_id": wsID, "wait": 5})
 	require.False(t, isErr, out)
 	assert.Contains(t, out, "Run "+runID+": succeeded")
-	assert.Contains(t, out, "Already going: this run was started before")
+	assert.Contains(t, out, "Already going: this run was started a few minutes ago with the same files and settings")
 }
 
-// Refused because the workspace's run is already going (one at a time), the
-// start follows that run instead of failing.
-func TestWorkspaceRun_RefusedFollowsTheRunGoing(t *testing.T) {
+// Refused because the account's one run is going, the start is not followed
+// into that run: it is another request, and the answer says it was not
+// started and names the run in its way.
+func TestWorkspaceRun_RefusedNamesTheRunGoing(t *testing.T) {
 	s := backend(t, map[string]http.HandlerFunc{
 		wsRoute("/workspaces/" + wsID + "/runs"): func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodPost {
 				w.WriteHeader(http.StatusTooManyRequests)
-				_, _ = w.Write([]byte(`{"error":"limit reached: 1 run(s) at a time on your account; wait for one to end or stop it"}`))
+				_, _ = w.Write([]byte(`{"error":"limit reached: your verified account runs 1 at a time; wait for it to end or stop it"}`))
 				return
 			}
 			jsonReply([]any{
-				map[string]any{"id": runID, "kind": "run", "status": "running", "active": true},
+				map[string]any{"id": runID, "kind": "run", "status": "queued", "queue_position": 1, "active": true,
+					"params": map[string]string{"BT_START": "2025-01-01", "PAIR": "BTC/USDT"}},
 			})(w, r)
 		},
-		wsRoute("/runs/" + runID):           jsonReply(map[string]any{"id": runID, "kind": "run", "status": "running", "active": true}),
-		"/frontend-api/api/v1/dev/sessions": jsonReply([]any{}),
 	})
-	out, isErr := call(t, s, "workspace_run", map[string]any{"workspace_id": wsID, "wait": 0})
-	require.False(t, isErr, out)
-	assert.Contains(t, out, "Run "+runID+": running")
-	assert.Contains(t, out, "Already going")
+	out, isErr := call(t, s, "workspace_run", map[string]any{"workspace_id": wsID, "env": map[string]any{"BT_START": "2025-06-01"}, "wait": 0})
+	require.True(t, isErr, out)
+	assert.Contains(t, out, "runs 1 at a time")
+	assert.Contains(t, out, "Not started and not queued: this request's settings were not used")
+	assert.Contains(t, out, "In the way: run "+runID+" (queued, number 1 in line for a shared machine; its parameters: BT_START=2025-01-01 PAIR=BTC/USDT)")
+	assert.Contains(t, out, "workspace_run_status run_id="+runID)
+	assert.Contains(t, out, "workspace_stop")
+	assert.NotContains(t, out, "Already going")
+}
+
+// A run refused for its settings says the files need no change; one refused
+// for its source says to fix the files; a mix names the settings.
+func TestRefusedNext(t *testing.T) {
+	params := map[string]string{"BT_START": "2019-01-01", "BT_END": "2018-01-01", "PAIR": "BTC/USDT"}
+	run := func(out string) *workspaceRun {
+		return &workspaceRun{Kind: "run", Status: "refused", Output: &out, Params: params}
+	}
+	got := refusedNext(run("main.go:14: BT_END 2018-01-01 is not after BT_START 2019-01-01: the backtest would replay nothing"))
+	assert.Contains(t, got, "Every problem above is a setting (BT_END), not the code")
+	assert.Contains(t, got, "The files need no change.")
+	assert.NotContains(t, got, "build again")
+
+	got = refusedNext(run("main.go:12: variant 2: BT_START 2019-01-01 is before the data: BTC/USDT on binance starts 2020-01-01 00:00 UTC\nmain.go:13: variant 3: BT_START 2018-01-01 is before the data"))
+	assert.Contains(t, got, "setting (BT_START)")
+
+	got = refusedNext(run("main.go:3: import \"net/http\" is not allowed\nmain.go:12: BT_START 2019-01-01 is before the data"))
+	assert.Contains(t, got, "The lines on BT_START are settings")
+	assert.Contains(t, got, "The others are in the files")
+
+	got = refusedNext(run("params.go:6: params.Int: the name, default and options must be literals"))
+	assert.Equal(t, "Fix the files and start the run again (a run builds them first).", got)
 }
 
 // The hosted server holds a call for at most HostedWaitCap.

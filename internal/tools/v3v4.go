@@ -28,6 +28,11 @@ type (
 		WinRate     float64  `json:"win_rate"`
 		PF          *float64 `json:"pf"`
 		AvgR        *float64 `json:"avg_r"`
+		// WipedOutAt: these costs take the account to zero at that
+		// trade's close (WipedOutTrade, in close order); the return
+		// stops at -100%.
+		WipedOutAt    *time.Time `json:"wiped_out_at"`
+		WipedOutTrade int        `json:"wiped_out_trade"`
 	}
 	costsResponse struct {
 		SessionID            string          `json:"session_id"`
@@ -266,7 +271,11 @@ func renderCosts(doc *render.Doc, b []byte) error {
 	}
 	rows := make([][]string, 0, len(c.Grid))
 	for _, g := range c.Grid {
-		rows = append(rows, []string{"×" + render.Num(g.FeeMult, -1), render.Num(g.SlippageBps, -1), render.Signed(g.Net, 2), render.Signed(g.ReturnPct, 2) + "%",
+		ret := render.Signed(g.ReturnPct, 2) + "%"
+		if g.WipedOutAt != nil {
+			ret += fmt.Sprintf(" (account gone at trade %d of %d, %s)", g.WipedOutTrade, c.Trades, g.WipedOutAt.UTC().Format("2006-01-02"))
+		}
+		rows = append(rows, []string{"×" + render.Num(g.FeeMult, -1), render.Num(g.SlippageBps, -1), render.Signed(g.Net, 2), ret,
 			render.Num(g.WinRate*100, 1) + "%", render.Opt(g.PF, 2), signedOpt(g.AvgR, 3)})
 	}
 	doc.Table("the closed trades charged again", []string{"fees", "slip_bp", "net", "return", "win", "pf", "avg_r"}, rows, nil)

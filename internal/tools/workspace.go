@@ -445,7 +445,7 @@ func addWorkspaceRun(s *server.MCPServer, d Deps) {
 			"`variants` makes it a sweep: 2 or more settings, each over `env`, run one after another on one build; the result is one table comparing them (return, drawdown, trades, win rate, PF, fees). "+
 			"Each variant counts as a run toward the day's runs, and all share the run's time."),
 		mcp.WithString("workspace_id", mcp.Required(), mcp.Description("Workspace UUID")),
-		mcp.WithObject("env", mcp.Description("Environment variables for the strategy, name → value")),
+		mcp.WithObject("env", mcp.Description("Environment variables for the strategy, name → value. A name that no parameter declares and no file names is refused before the run starts, with the parameter it most likely meant: a misspelt setting would otherwise run its default.")),
 		mcp.WithBoolean("smoke", mcp.Description("Run the first 7 days first, then the full run (or the sweep: its first variant) if that passed (dev_sdk v1.9.0 and later)")),
 		mcp.WithString("stress", mcp.Description("standard: a cost stress sweep of 6 variants on one build: as is, fees ×1.5, fees ×2, 5 bp and 10 bp slippage on every taker fill, funding off (dev_sdk v1.10.0 and later; 6 runs)"), mcp.Enum("standard")),
 		mcp.WithArray("variants", mcp.Description("A sweep: 2 or more objects of settings (name → value), e.g. [{\"STOP_ATR\":\"1.5\"},{\"STOP_ATR\":\"2\"}]; at most 10 (verified), 20 (pro), 50 (admin)"),
@@ -549,18 +549,21 @@ func stringValues(obj map[string]any, what string) (map[string]string, error) {
 }
 
 // startRun starts a build or run and reports it once it ends or wait passes.
-// A start refused because the account's run is already going in this
-// workspace (a retry after a cut call, most often) follows that run instead.
+// A retry of a start that went through (a cut call) is matched by the
+// service itself, which returns that run marked already_running. A start
+// refused because the account's one run is going is a different request: it
+// is not started, and the answer names the run in its way.
 func (d Deps) startRun(ctx context.Context, name, workspaceID string, body map[string]any, wait time.Duration) (*mcp.CallToolResult, error) {
 	resp, status, err := d.HTTP.Do(ctx, true, client.HeaderStyleStandard, http.MethodPost, client.Workspace, wsPath(workspaceID)+"/runs", nil, body)
 	if err != nil {
 		return toolErr(fmt.Errorf("%s: %w", name, err)), nil
 	}
 	if status == http.StatusTooManyRequests && strings.Contains(string(resp), "at a time") {
+		refused := httpErr(name, status, resp)
 		if run, ok := d.activeRun(ctx, name, workspaceID); ok {
-			run.AlreadyRunning = true
-			return d.reportRun(ctx, name, run, wait)
+			return toolErr(busyErr(refused, run)), nil
 		}
+		return toolErr(fmt.Errorf("%w. Not started and not queued: this request's settings were not used; start it again once that run ends", refused)), nil
 	}
 	if status < 200 || status >= 300 {
 		return toolErr(httpErr(name, status, resp)), nil
@@ -570,6 +573,31 @@ func (d Deps) startRun(ctx context.Context, name, workspaceID string, body map[s
 		return toolErr(fmt.Errorf("%s: decode response: %w", name, err)), nil
 	}
 	return d.reportRun(ctx, name, run, wait)
+}
+
+// busyErr is a start refused while run, in the same workspace, holds the
+// account's one run at a time.
+func busyErr(refused error, run workspaceRun) error {
+	where := run.Status
+	if run.Status == "queued" && run.QueuePosition > 0 {
+		where += fmt.Sprintf(", number %d in line for a shared machine", run.QueuePosition)
+	}
+	settings := ""
+	if len(run.Params) > 0 {
+		names := make([]string, 0, len(run.Params))
+		for n := range run.Params {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		parts := make([]string, len(names))
+		for i, n := range names {
+			parts[i] = n + "=" + run.Params[n]
+		}
+		settings = "; its parameters: " + strings.Join(parts, " ")
+	}
+	return fmt.Errorf("%w. Not started and not queued: this request's settings were not used. In the way: %s %s (%s%s). "+
+		"Follow it with workspace_run_status run_id=%s wait=120 or end it with workspace_stop, then start this one again",
+		refused, run.Kind, run.ID, where, settings, run.ID)
 }
 
 // activeRun is the workspace's newest run still going, if any.
@@ -650,7 +678,7 @@ func renderRunHead(doc *render.Doc, r *workspaceRun) {
 	}
 	doc.Line("%s.", head)
 	if r.AlreadyRunning {
-		doc.Line("Already going: this %s was started before (the same start again, or the account's one run at a time), so it is followed rather than a second one started.", r.Kind)
+		doc.Line("Already going: this %s was started a few minutes ago with the same files and settings (a repeated start), so it is followed rather than a second one started.", r.Kind)
 	}
 	if len(r.Params) > 0 {
 		names := make([]string, 0, len(r.Params))
@@ -711,7 +739,7 @@ func (d Deps) renderRunSessions(ctx context.Context, doc *render.Doc, r *workspa
 		if s.Progress != nil {
 			progress = render.Pct(s.Progress.Percent, 0)
 		}
-		rows = append(rows, []string{s.ID, render.Clip(s.Name, 40), s.Status, progress, s.Pair, s.Timeframe})
+		rows = append(rows, []string{s.ID, render.ClipName(s.Name, 40), s.Status, progress, s.Pair, s.Timeframe})
 	}
 	doc.Table("Backtest sessions of this run", []string{"session_id", "name", "status", "progress", "first_pair", "tf"}, rows, nil)
 }
@@ -744,11 +772,66 @@ func renderNext(doc *render.Doc, r *workspaceRun) {
 	switch {
 	case r.Active:
 		doc.Line("Still %s: workspace_run_status run_id=%s wait=120 to follow it, workspace_stop to end it.", r.Status, r.ID)
+	case r.Status == "refused" && r.Kind == "run":
+		doc.Line("%s", refusedNext(r))
 	case r.Status == "refused" || (r.Status == "failed" && r.Kind == "build"):
 		doc.Line("Fix the files and build again.")
 	case r.Kind == "run" && r.Status == "succeeded":
 		doc.Line("Next: get_session_report with a session_id above.")
 	}
+}
+
+// refusedNext says what to change after a refused run. A problem that
+// begins with one of the run's parameters (BT_START, PAIRS…) is about its
+// settings, the window or the data, though it points at the declaration's
+// line: the files are fine, and only the value changes.
+func refusedNext(r *workspaceRun) string {
+	var settings []string
+	seen := map[string]bool{}
+	files := false
+	if r.Output != nil {
+		for _, line := range strings.Split(strings.TrimSpace(*r.Output), "\n") {
+			if line = strings.TrimSpace(line); line == "" {
+				continue
+			}
+			if p := settingOf(line, r.Params); p != "" {
+				if !seen[p] {
+					seen[p] = true
+					settings = append(settings, p)
+				}
+				continue
+			}
+			files = true
+		}
+	}
+	switch {
+	case len(settings) > 0 && !files:
+		return fmt.Sprintf("Every problem above is a setting (%s), not the code: give another value in env (or change the parameter's default) and start the run again. The files need no change.", strings.Join(settings, ", "))
+	case len(settings) > 0:
+		return fmt.Sprintf("The lines on %s are settings: change their values in env (or the parameters' defaults). The others are in the files: fix them, then start the run again.", strings.Join(settings, ", "))
+	default:
+		return "Fix the files and start the run again (a run builds them first)."
+	}
+}
+
+// settingOf is the parameter a refusal line is about, "" when it is not
+// about one: "main.go:12: BT_END 2026-01-01 is not after …", or with
+// "variant 2: " before the name.
+func settingOf(line string, params map[string]string) string {
+	rest := line
+	if i := strings.Index(rest, ": "); i >= 0 {
+		rest = rest[i+2:]
+	}
+	if strings.HasPrefix(rest, "variant ") {
+		if i := strings.Index(rest, ": "); i >= 0 {
+			rest = rest[i+2:]
+		}
+	}
+	name, _, _ := strings.Cut(rest, " ")
+	if _, ok := params[name]; ok && name != "" {
+		return name
+	}
+	return ""
 }
 
 func addWorkspaceRunStatus(s *server.MCPServer, d Deps) {

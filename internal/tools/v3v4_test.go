@@ -14,7 +14,9 @@ func costsFixture(be float64) map[string]any {
 	return map[string]any{"session_id": sid, "trades": 908, "net": 172.1, "gross": 227.3, "fees": 43.1, "funding": 12.1, "turnover": 95000, "fees_bps": 4.5,
 		"break_even_fee_mult": 4.99, "break_even_slippage_bps": be, "cost_r": 0.07, "slippage_r_per_bp": 0.012,
 		"grid": []map[string]any{{"fee_mult": 1, "slippage_bps": 0, "net": 172.1, "return_pct": 57.4, "win_rate": 0.2, "pf": 1.23, "avg_r": 0.225},
-			{"fee_mult": 2, "slippage_bps": 10, "net": -41.6, "return_pct": -13.9, "win_rate": 0.18, "pf": 0.95, "avg_r": -0.02}},
+			{"fee_mult": 2, "slippage_bps": 10, "net": -41.6, "return_pct": -13.9, "win_rate": 0.18, "pf": 0.95, "avg_r": -0.02},
+			{"fee_mult": 2, "slippage_bps": 20, "net": -300, "return_pct": -100, "win_rate": 0.1, "pf": 0.5, "avg_r": -0.3,
+				"wiped_out_at": "2025-03-04T10:00:00Z", "wiped_out_trade": 140}},
 		"notes": []string{"Every trade is kept where it was."}}
 }
 
@@ -37,6 +39,7 @@ func TestCostStressAndEntryEdge(t *testing.T) {
 	assert.Contains(t, q, "slippage_bps=0%2C10")
 	assert.Contains(t, text, "net reaches zero at 18.1 bp of slippage on every fill (at today's fees), or at fees ×4.99")
 	assert.Contains(t, text, "×2\t10\t-41.60\t-13.90%")
+	assert.Contains(t, text, "×2\t20\t-300.00\t-100.00% (account gone at trade 140 of", "the return stops at -100% and says where")
 	assert.Contains(t, text, "fees and funding take 0.070R already")
 
 	text, isErr = call(t, s, "get_entry_edge", map[string]any{"session_id": sid})

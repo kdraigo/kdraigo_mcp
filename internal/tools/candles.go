@@ -8,7 +8,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -24,7 +27,8 @@ func RegisterCandles(s *server.MCPServer, d Deps) {
 	addFlow(s, d)
 	addPositioning(s, d)
 	tool := mcp.NewTool("get_candles",
-		mcp.WithDescription("Fetch OHLCV candles from data_provider. Public endpoint, no auth required. At most 50,000 bars per call (about a month of 1m): for longer ranges, use a larger timeframe or split the range into several calls."),
+		mcp.WithDescription("Fetch OHLCV candles from data_provider. Public endpoint, no auth required. At most 50,000 bars per call (about a month of 1m): for longer ranges, use a larger timeframe or split the range into several calls. "+
+			"A range with no bars says why (before the market's history, after its newest bar, or a gap in it); a market the exchange does not have, times in seconds and a reversed or future range are errors."),
 		mcp.WithString("exchange", mcp.Required(), mcp.Description("Exchange ID, e.g. binance or bybit")),
 		mcp.WithString("symbol", mcp.Required(), mcp.Description("Symbol, slash form e.g. BTC/USDT")),
 		mcp.WithString("timeframe", mcp.Required(), mcp.Description("Timeframe. One of: 1m, 2m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 1d, 1w, 1M. Case-sensitive: 1m is one minute, 1M is one month. Anything else is rejected with HTTP 400 — it is not silently served as 1m data.")),
@@ -53,12 +57,16 @@ func RegisterCandles(s *server.MCPServer, d Deps) {
 		if err != nil {
 			return toolErr(err), nil
 		}
+		fromMs, toMs, err := millisRange(from, to, time.Now())
+		if err != nil {
+			return toolErr(fmt.Errorf("get_candles: %w", err)), nil
+		}
 		q := url.Values{}
 		q.Set("exchange", exchange)
 		q.Set("symbol", symbol)
 		q.Set("timeframe", timeframe)
-		q.Set("from", from)
-		q.Set("to", to)
+		q.Set("from", strconv.FormatInt(fromMs, 10))
+		q.Set("to", strconv.FormatInt(toMs, 10))
 		body, status, err := d.HTTP.Do(ctx, false, client.HeaderStyleStandard, http.MethodGet, client.Data, "/api/v1/candles", q, nil)
 		if err != nil {
 			return toolErr(err), nil
@@ -66,8 +74,111 @@ func RegisterCandles(s *server.MCPServer, d Deps) {
 		if status < 200 || status >= 300 {
 			return toolErr(httpErr("get_candles", status, body)), nil
 		}
+		if b := bytes.TrimSpace(body); string(b) == "null" || string(b) == "[]" {
+			return d.noCandles(ctx, exchange, symbol, fromMs, toMs), nil
+		}
 		return toolText(string(body)), nil
 	})
+}
+
+// minMillis is 1973-03-03 in milliseconds: a time below it is seconds (as
+// seconds it is the year 5138), or a mistake.
+const minMillis = 100_000_000_000
+
+// millisRange reads a request's from and to as Unix milliseconds and refuses
+// what would only come back empty: seconds, a range that ends before it
+// starts, a start in the future.
+func millisRange(from, to string, now time.Time) (int64, int64, error) {
+	parse := func(name, raw string) (int64, error) {
+		v, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("%s %q: give Unix epoch milliseconds, a whole number like 1778803200000 (2026-05-15 00:00 UTC)", name, raw)
+		}
+		if v < minMillis {
+			if v > 0 {
+				return 0, fmt.Errorf("%s %d looks like seconds (%s UTC as seconds, %s as milliseconds): give milliseconds, %d", name, v, utc(v*1000), utc(v), v*1000)
+			}
+			return 0, fmt.Errorf("%s %d is not a time the data holds: give Unix epoch milliseconds, like 1778803200000", name, v)
+		}
+		return v, nil
+	}
+	f, err := parse("from", from)
+	if err != nil {
+		return 0, 0, err
+	}
+	t, err := parse("to", to)
+	if err != nil {
+		return 0, 0, err
+	}
+	if t < f {
+		return 0, 0, fmt.Errorf("to (%s UTC) is before from (%s UTC): the range is reversed", utc(t), utc(f))
+	}
+	if f > now.UnixMilli() {
+		return 0, 0, fmt.Errorf("from (%s UTC) is in the future: there are no bars after now (%s UTC)", utc(f), utc(now.UnixMilli()))
+	}
+	return f, t, nil
+}
+
+func utc(ms int64) string { return time.UnixMilli(ms).UTC().Format("2006-01-02 15:04") }
+
+// noCandles says why a request came back empty: a market the exchange does
+// not have is a wrong request; a range outside its history, or in a gap of
+// it, is a right one with nothing in it.
+func (d Deps) noCandles(ctx context.Context, exchange, symbol string, from, to int64) *mcp.CallToolResult {
+	what := fmt.Sprintf("no candles for %s on %s from %s to %s UTC", symbol, exchange, utc(from), utc(to))
+	body, status, err := d.HTTP.Do(ctx, false, client.HeaderStyleStandard, http.MethodGet, client.Data, "/api/v1/metadata", nil, nil)
+	var meta map[string]struct {
+		Symbols map[string]struct {
+			Start int64 `json:"start"`
+			End   int64 `json:"end"`
+		} `json:"symbols"`
+	}
+	if err != nil || status < 200 || status >= 300 || json.Unmarshal(body, &meta) != nil {
+		return toolText(fmt.Sprintf("No candles: %s (the coverage could not be read to say why; get_data_coverage lists what there is).", what))
+	}
+	symbols := meta[exchange].Symbols
+	key := strings.ReplaceAll(symbol, "/", "")
+	span, ok := symbols[key]
+	if !ok {
+		if _, upper := symbols[strings.ToUpper(key)]; upper {
+			return toolErr(fmt.Errorf("get_candles: symbols are upper case: %s, not %s", strings.ToUpper(symbol), symbol))
+		}
+		msg := fmt.Sprintf("get_candles: %s is not a market on %s, so there is nothing to return", symbol, exchange)
+		if alike := alikeSymbols(symbols, strings.ToUpper(key)); len(alike) > 0 {
+			msg += fmt.Sprintf(" (it has %s, stored without the slash)", strings.Join(alike, ", "))
+		}
+		return toolErr(fmt.Errorf("%s. get_data_coverage lists every market", msg))
+	}
+	switch {
+	case to < span.Start:
+		return toolText(fmt.Sprintf("No candles: %s. Its history starts %s UTC: the range ends before it.", what, utc(span.Start)))
+	case from > span.End:
+		return toolText(fmt.Sprintf("No candles: %s. Its newest bar is %s UTC: the range starts after it.", what, utc(span.End)))
+	default:
+		return toolText(fmt.Sprintf("No candles: %s, inside its history (%s to %s UTC): a gap in the exchange's own record.", what, utc(span.Start), utc(span.End)))
+	}
+}
+
+// alikeSymbols are up to five of an exchange's symbols that share key's
+// first three letters, for a near miss.
+func alikeSymbols(symbols map[string]struct {
+	Start int64 `json:"start"`
+	End   int64 `json:"end"`
+}, key string) []string {
+	if len(key) < 3 {
+		return nil
+	}
+	var out []string
+	for s := range symbols {
+		if strings.HasPrefix(s, key[:3]) {
+			out = append(out, s)
+		}
+	}
+	sort.Strings(out)
+	if len(out) > 5 {
+		out = out[:5]
+	}
+	return out
 }
 
 // Market data answers (get_flow, get_positioning) come as CSV by default:

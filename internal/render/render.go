@@ -213,3 +213,21 @@ func Clip(s string, n int) string {
 	}
 	return string(r[:n]) + "…"
 }
+
+// ClipName shortens a name to n runes from its middle, keeping its end where
+// tags go ("… (smoke)", "… · slippage 10 bp"): a trailing "(…)" is kept
+// whole when it fits in half of n.
+func ClipName(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n || n < 3 {
+		return Clip(s, n)
+	}
+	tail := n / 3
+	if i := strings.LastIndex(s, " ("); i >= 0 && strings.HasSuffix(s, ")") {
+		if t := len([]rune(s[i:])); t <= n/2 {
+			tail = t
+		}
+	}
+	head := n - tail - 1
+	return strings.TrimRight(string(r[:head]), " ") + "…" + string(r[len(r)-tail:])
+}

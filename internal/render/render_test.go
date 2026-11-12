@@ -76,3 +76,22 @@ func TestTableStopsAtTheCapAndSaysHow(t *testing.T) {
 		t.Fatal("wrote past the cut")
 	}
 }
+
+// A long name gives way in the middle: its end, where tags go, stays.
+func TestClipName(t *testing.T) {
+	plain := ClipName("ema-cross trend ATR stop BTC ETH SOL 2024-2025 slippage 10 bp", 40)
+	for in, want := range map[string]string{
+		"short (smoke)": "short (smoke)",
+		"ema-cross trend ATR stop BTC ETH SOL 2024-2025 (smoke)": "ema-cross trend ATR stop BTC ET… (smoke)",
+	} {
+		if got := ClipName(in, 40); got != want {
+			t.Errorf("ClipName(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if n := len([]rune(plain)); n != 40 || !strings.HasSuffix(plain, "lippage 10 bp") {
+		t.Errorf("ClipName kept %q (%d runes)", plain, n)
+	}
+	if got := ClipName("abcdef", 2); got != "ab…" {
+		t.Errorf("too short to keep an end: %q", got)
+	}
+}
