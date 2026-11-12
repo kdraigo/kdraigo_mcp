@@ -87,6 +87,9 @@ func renderSessions(list []sessionSummary, limit, offset int) string {
 		if s.IsFavorite {
 			tags = strings.TrimPrefix(tags+",★", ",")
 		}
+		if len(s.Stress) > 0 {
+			tags = strings.TrimPrefix(tags+",stress: "+strings.Join(s.Stress, "+"), ",")
+		}
 		rows = append(rows, []string{
 			s.ID, render.Clip(s.Name, 40), s.Status, progress,
 			exchanges(s.Exchange, s.Exchanges), s.Pair, s.Timeframe, render.Time(s.CreatedAt), tags,
@@ -140,6 +143,12 @@ func renderDetail(s *sessionDetail) string {
 	doc := render.New()
 	doc.Line("Session %s%s · %s · %s · %d instruments on %s", s.ID, titled(s.Name), s.Status, s.Timeframe, len(s.Instruments), exchanges(s.Exchange, s.Exchanges))
 	doc.Line("Window %s → %s UTC · created %s", render.OptTime(s.StartAt), render.OptTime(s.EndAt), render.Time(s.CreatedAt))
+	if c := costsLine(s.Execution, venuesOf(s)); c != "" {
+		doc.Line("%s", c)
+	}
+	if w := stressWarning(s.Stress); w != "" {
+		doc.Line("%s", w)
+	}
 	if p := s.Progress; p != nil {
 		doc.Line("Progress %d / %d candles (%s), last candle %s", p.ProcessedCandles, p.TotalCandles, render.Pct(p.Percent, 1), render.OptTime(p.LastCandleTime))
 	}
@@ -421,4 +430,15 @@ func (d Deps) closeSession(ctx context.Context, id string) (status string, held 
 		return "", false, httpErr("close_session", code, body)
 	}
 	return string(body), true, nil
+}
+
+// venuesOf is every exchange a session ran on, from its wallets.
+func venuesOf(s *sessionDetail) []string {
+	if len(s.Exchanges) > 0 {
+		return s.Exchanges
+	}
+	if s.Exchange != "" {
+		return []string{s.Exchange}
+	}
+	return nil
 }

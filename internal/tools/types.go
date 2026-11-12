@@ -26,6 +26,10 @@ type sessionSummary struct {
 	Tags       []string         `json:"tags"`
 	CreatedAt  time.Time        `json:"created_at"`
 	Progress   *sessionProgress `json:"progress"`
+	// Stress names the cost stress the run was made under ("slippage
+	// 10 bp", "fees ×1.5", "funding off"); empty when none, and from a
+	// frontend_api before it.
+	Stress []string `json:"stress"`
 }
 
 type wallet struct {
@@ -68,6 +72,24 @@ type sessionDetail struct {
 	StartAt     *time.Time       `json:"start_at"`
 	EndAt       *time.Time       `json:"end_at"`
 	Instruments []instrument     `json:"instruments"`
+	// Execution is what the backtest assumed about fills and costs; nil for
+	// a session from before the engine recorded it, or an older frontend_api.
+	Execution *sessionExecution `json:"execution"`
+	Stress    []string          `json:"stress"`
+}
+
+// sessionExecution is frontend_api's ExecutionDTO: fees are fractions, after
+// FeeMult; each field null where the session predates it.
+type sessionExecution struct {
+	FillPolicy      *string  `json:"fill_policy"`
+	GapFills        *bool    `json:"gap_fills"`
+	MakerFee        *float64 `json:"maker_fee"`
+	TakerFee        *float64 `json:"taker_fee"`
+	FuturesMakerFee *float64 `json:"futures_maker_fee"`
+	FuturesTakerFee *float64 `json:"futures_taker_fee"`
+	SlippageBps     *float64 `json:"slippage_bps"`
+	FeeMult         *float64 `json:"fee_mult"`
+	FundingEnabled  *bool    `json:"funding_enabled"`
 }
 
 // frontend_api /sessions/:id/positions/page and /funding/page.

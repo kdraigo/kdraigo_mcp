@@ -146,6 +146,9 @@ func renderReport(in *reportInputs) string {
 		if det.StartAt != nil && det.EndAt != nil {
 			doc.Line("Window %s → %s UTC · %s days", render.Date(*det.StartAt), render.Date(*det.EndAt), render.Num(det.EndAt.Sub(*det.StartAt).Hours()/24, 0))
 		}
+		if c := costsLine(det.Execution, venuesOf(det)); c != "" {
+			doc.Line("%s", c)
+		}
 	} else {
 		doc.Line("Session %s · %s", p.SessionID, in.kind)
 	}
@@ -321,6 +324,9 @@ func reportWarnings(in *reportInputs) []string {
 	var out []string
 
 	if det := in.detail; det != nil {
+		if w := stressWarning(det.Stress); w != "" {
+			out = append(out, w)
+		}
 		switch {
 		case !terminalStatuses[strings.ToUpper(det.Status)]:
 			out = append(out, fmt.Sprintf("Run not finished (status %s): every figure is partial and will change.", det.Status))

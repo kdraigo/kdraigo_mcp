@@ -264,8 +264,17 @@ environment variables `KDRAIGO_SIM_SLIPPAGE_BPS`, `KDRAIGO_SIM_FEE_MULT` and
 `KDRAIGO_SIM_FUNDING=off` apply over `Backtest.Simulation`, and the run log names
 them (`Backtest Engine: stress …`). In the cloud workspace `workspace_run
 stress=standard` runs the strategy as is, at fees ×1.5 and ×2, with 5 and 10 bp of
-slippage, and without funding: six variants on one build. Locally, set the variables
-before `go run .`.
+slippage, and without funding: six variants on one build. For one setting of your own,
+pass the variable in `workspace_run`'s `env`, e.g. `{"KDRAIGO_SIM_SLIPPAGE_BPS":"15"}`,
+or in a sweep's `variants` next to your parameters, e.g.
+`[{"STOP_ATR":"2","KDRAIGO_SIM_SLIPPAGE_BPS":"10"}, …]`: these three are the only
+`KDRAIGO_*` names a run may set, and the platform checks their values. Locally, set
+the variables before `go run .`.
+
+Every session keeps what it ran under: `get_session_report` and `get_session_detail`
+print a `Costs:` line (fees, slippage, funding, gap fills, fill policy), and a session
+made under a stress opens its warnings with `Cost stress (…)`. Report such a run as a
+stress, never as the strategy's own result.
 
 ### Short positions
 

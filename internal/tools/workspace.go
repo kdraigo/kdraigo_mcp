@@ -439,7 +439,8 @@ func addWorkspaceRun(s *server.MCPServer, d Deps) {
 	tool := mcp.NewTool("workspace_run",
 		mcp.WithDescription("Build a workspace and run it on a sandbox machine: the strategy opens its backtest session with a key minted for this run alone (revoked when it ends). "+
 			"Waits up to `wait` seconds; a run still going returns its id for workspace_run_status. The result names the backtest sessions the run made: pass one to get_session_report. "+
-			"`env` sets your own variables (upper-case names, not KDRAIGO_*), e.g. {\"STRATEGY_RISK\":\"0.02\"}. "+
+			"`env` sets your own variables (upper-case names), e.g. {\"STRATEGY_RISK\":\"0.02\"}. Of the KDRAIGO_* names only the cost stress settings are allowed, in env or in a variant next to your parameters: "+
+			"KDRAIGO_SIM_SLIPPAGE_BPS (0–1000, on every market and stop fill), KDRAIGO_SIM_FEE_MULT (0–20, every fee) and KDRAIGO_SIM_FUNDING (on/off); they apply over the strategy's Simulation (dev_sdk v1.10.0 and later). "+
 			"`smoke` (dev_sdk v1.9.0 and later) first runs the window's first 7 days and starts the full run only if that exits cleanly: a panic or a refused order shows in seconds. With `variants`, the first variant runs those 7 days, then the whole sweep. "+
 			"`variants` makes it a sweep: 2 or more settings, each over `env`, run one after another on one build; the result is one table comparing them (return, drawdown, trades, win rate, PF, fees). "+
 			"Each variant counts as a run toward the day's runs, and all share the run's time."),
