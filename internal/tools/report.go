@@ -180,6 +180,13 @@ func renderReport(in *reportInputs) string {
 	if p.ReportVersion >= 2 {
 		warnings = serverWarnings(in)
 	}
+	// A run made under a cost stress says so before anything else, whichever
+	// service wrote the rest: its figures are not the strategy's own.
+	if det := in.detail; det != nil {
+		if w := stressWarning(det.Stress); w != "" {
+			warnings = append([]string{"[high] " + w}, warnings...)
+		}
+	}
 	if len(warnings) > 0 {
 		doc.Blank()
 		doc.Line("## warnings")
@@ -324,9 +331,6 @@ func reportWarnings(in *reportInputs) []string {
 	var out []string
 
 	if det := in.detail; det != nil {
-		if w := stressWarning(det.Stress); w != "" {
-			out = append(out, w)
-		}
 		switch {
 		case !terminalStatuses[strings.ToUpper(det.Status)]:
 			out = append(out, fmt.Sprintf("Run not finished (status %s): every figure is partial and will change.", det.Status))

@@ -52,7 +52,19 @@ func TestReportNamesItsCostsAndStress(t *testing.T) {
 	text, isErr := call(t, s, "get_session_report", map[string]any{"session_id": sid})
 	require.False(t, isErr, text)
 	assert.Contains(t, text, "Costs: perp fees taker 0.05% / maker 0.02% · slippage 10 bp on market and stop fills")
-	assert.Contains(t, text, "## warnings\n- Cost stress (slippage 10 bp)")
+	assert.Contains(t, text, "## warnings\n- [high] Cost stress (slippage 10 bp)")
+
+	// The same from an analytics_service that writes the warnings itself
+	// (report version 2 and later), as production does.
+	p := reportFixture()
+	p.SessionID, p.ReportVersion = sid, 4
+	p.Warnings = []reportWarning{{Code: "few_trades", Severity: "medium", Message: "Only 1 closed trades."}}
+	routes["/analytics/api/v1/dev/analytics/performance"] = jsonReply(p)
+	s = backend(t, routes)
+	text, isErr = call(t, s, "get_session_report", map[string]any{"session_id": sid})
+	require.False(t, isErr, text)
+	assert.Contains(t, text, "## warnings\n- [high] Cost stress (slippage 10 bp)")
+	assert.Contains(t, text, "- [medium] Only 1 closed trades.", "the server's warnings follow")
 
 	text, isErr = call(t, s, "get_session_detail", map[string]any{"session_id": sid})
 	require.False(t, isErr, text)

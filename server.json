@@ -3,7 +3,7 @@
   "name": "com.kdraigo/mcp",
   "title": "kdraigo",
   "description": "Your AI writes Go trading strategies; kdraigo backtests them on one-minute Binance and Bybit data.",
-  "version": "1.32.0",
+  "version": "1.32.1",
   "websiteUrl": "https://kdraigo.com",
   "repository": {
     "url": "https://github.com/kdraigo/kdraigo_mcp",
