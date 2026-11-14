@@ -52,7 +52,7 @@ types.Config{
 
 Key types you will touch:
 
-- `types.Candle` — `Exchange`, `Symbol`, `Timeframe`, `OpenTime`, `CloseTime`, `Open/High/Low/Close/Volume`, `IsComplete`. `Volume` is the **base-asset** volume (there is no separate `BaseVolume` field). Plus order-flow metrics for Wyckoff / Composite-Man analysis: `TradeCount` (int64, number of trades), `QuoteVolume` (quote-asset turnover), `TakerBuyBaseVolume` and `TakerBuyQuoteVolume` (aggressive-buy pressure). These are **0 when the source exchange doesn't provide them** — Binance klines populate all of them; e.g. Bybit exposes `QuoteVolume` but not `TradeCount`/taker-buy splits. Guard on non-zero before relying on them.
+- `types.Candle` — `Exchange`, `Symbol`, `Timeframe`, `OpenTime`, `CloseTime`, `Open/High/Low/Close/Volume`, `IsComplete`, and `Positioning` / `Flow` when `Config.MarketData` asks for them (see the market data section). `Volume` is the **base-asset** volume (there is no separate `BaseVolume` field). Plus order-flow metrics for Wyckoff / Composite-Man analysis: `TradeCount` (int64, number of trades), `QuoteVolume` (quote-asset turnover), `TakerBuyBaseVolume` and `TakerBuyQuoteVolume` (aggressive-buy pressure). These are **0 when the source exchange doesn't provide them** — Binance klines populate all of them; e.g. Bybit exposes `QuoteVolume` but not `TradeCount`/taker-buy splits. Guard on non-zero before relying on them.
 - `types.Order` — `ID`, `Side` (BUY/SELL), `Type` (MARKET/LIMIT/STOP_LOSS/STOP_LOSS_LIMIT/TAKE_PROFIT_LIMIT), `Status` (NEW/PARTIALLY_FILLED/FILLED/CANCELED/REJECTED), `Price`, `Quantity`, `FilledQty`, `AveragePrice`, plus `StopPrice` and `GroupID` for bracket legs (`GroupID` is shared by the two legs of a bracket, empty otherwise).
   - **Fees:** `Fee` + `FeeAsset` are what the venue reported **on this update**, and backends differ: the latest fill's commission alone on Binance futures, a running total on Bybit, the whole order's fee in backtests (orders fill whole there). For an order's total read `CumulativeFee` (dev_sdk ≥ v1.2.12), which means the same on every backend. Summing `Fee` over updates is only right on Binance futures, and only if no update is missed.
   - **`RealizedPnL`** (dev_sdk ≥ v1.2.12) is the venue's realized profit on the order's fills so far, before fees. Binance futures only; 0 on spot and in backtests, where futures P&L is on the positions (`get_session_positions`).
@@ -108,6 +108,42 @@ candles, err := s.GetCandlesFromTo(ctx, "binance", "BTC/USDT", from, to, types.T
 ```
 
 In backtest, `to` must not exceed `ctx.Now()` — the engine rejects future fetches with `historical candles not available at simulated time T`. This prevents look-ahead leakage.
+
+## market data (funding, positioning, trade flow)
+
+dev_sdk ≥ v1.11.0. Three series beside the prices. Per-bar data rides **on the candle**; ask for it in `Config.MarketData`:
+
+```go
+cfg.MarketData = []types.MarketData{types.MarketDataPositioning, types.MarketDataFlow}
+
+s.SetOnCandleFor(types.Timeframe1h, func(ctx *types.Context, c *types.Candle) {
+    if p := c.Positioning; p != nil { /* perpetuals only */ }
+    if f := c.Flow; f != nil { /* this bar's taker flow */ }
+})
+```
+
+Lookbacks, and funding, are **calls** (same no-look-ahead rule as `GetCandlesFromTo`: in a backtest a `to` after `s.Now()` is an error; live, it is read as now):
+
+```go
+week := s.Now().Add(-7 * 24 * time.Hour)
+rates, err := s.GetFundingRates(ctx.Ctx, "binance_futures", "BTC/USDT", week, s.Now()) // []types.FundingRate
+oi, err    := s.GetPositioning(ctx.Ctx, "binance_futures", "BTC/USDT", types.Timeframe1h, week, s.Now()) // []types.Positioning; "" = 5m
+flow, err  := s.GetFlow(ctx.Ctx, "binance", "BTC/USDT", types.Timeframe1h, week, s.Now()) // []types.Flow; "" = 1m
+```
+
+| Series | Fields | Where | History |
+|---|---|---|---|
+| `types.FundingRate` | `Time` (settlement, often a few ms after the hour), `Rate` (positive: longs pay), `MarkPrice`, `IntervalHours` | perpetuals (`binance_futures`, `bybit_futures`); spot is an error | 2024-01-01 or the listing |
+| `types.Positioning` | `Time` (the instant the values are as of), `OpenTime`, `OpenInterest` (base, one side), `OpenInterestValue` (quote; Binance only), `LongShortRatio`, `LongAccountShare`, `TopAccountRatio`, `TopPositionRatio`, `TakerBuySellRatio` (these three Binance only), `Periods` | perpetuals; `c.Positioning` is nil on spot | 2020-09 or the listing |
+| `types.Flow` | `OpenTime`, `BuyVolume`, `SellVolume` (base; a buy is a taker buying), `Delta`, `BuyQuote`, `SellQuote`, `VWAP`, `BuyTrades`, `SellTrades`, `MaxPrintQuote`, `LargePrints10k`/`LargeQuote10k`, `LargePrints100k`/`LargeQuote100k`, `Minutes`, `Complete` | every collected market, spot and perpetual | 2025-03-01 |
+
+Rules to rely on:
+
+- **Positioning is published 90 s after its 5-minute period ends.** A candle closing at 12:00 carries the period that ended at 11:55, never the one ending at 12:00; `p.Time` says which. `GetPositioning` returns only bars whose end was published by `to`. A period older than 30 minutes is not put on a candle (nil instead of a stale value).
+- **A candle's `Flow` is its own bar**, summed over its minutes. `Complete` false = a minute was missing, the sums are short. Binance futures minutes come from aggregate trades, so a few percent of a minute's volume can sit in the neighbouring minute (daily totals exact).
+- **nil means none for that bar**; a value the venue does not publish is `0` (a real ratio or open interest is never 0). Not in the SDK: liquidations, minute open interest, the current (predicted) funding rate — collected only since 2026-11-06 (read them with `get_flow`).
+- **Live**, the SDK reads the same series from the platform's data API as each candle closes (`LiveOptions.DataURL`, default `https://api.kdraigo.com/data`), so the numbers equal the backtest's. A closed candle waits up to ~10 s for its flow bar.
+- Many coins sit at the default 0.01% funding for long stretches: equal 7-day sums across coins are real data. Compare times with ranges, never equality on the hour.
 
 ## callbacks
 
@@ -407,7 +443,8 @@ funding can exceed the trading PnL, so it is on by default; `funding_enabled: fa
 is allowed for isolating its effect but is a directional bias, not a simplification.
 
 Read the ledger back with the `get_session_funding` tool, and positions with
-`get_session_positions`.
+`get_session_positions`. A strategy reads the rates themselves with
+`s.GetFundingRates` (see the market data section).
 
 ### Liquidation
 
