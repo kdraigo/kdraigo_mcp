@@ -94,6 +94,22 @@ type (
 		Ref  string `json:"ref"`
 		Name string `json:"name"`
 	}
+	chartScript struct {
+		Ref     string          `json:"ref"`
+		Name    string          `json:"name"`
+		Version int64           `json:"version"`
+		Inputs  json.RawMessage `json:"inputs"`
+		Hidden  bool            `json:"hidden"`
+	}
+	// chartNow is what the user's chart showed at its last snapshot.
+	chartNow struct {
+		Venue      string `json:"venue"`
+		Pair       string `json:"pair"`
+		Timeframe  string `json:"timeframe"`
+		Replay     *int64 `json:"replay"`
+		Follow     *bool  `json:"follow"`
+		AgeSeconds int    `json:"age_seconds"`
+	}
 	chartRead struct {
 		Sharing bool   `json:"sharing"`
 		Reason  string `json:"reason"`
@@ -108,16 +124,18 @@ type (
 			Bars       []chartBar    `json:"bars"`
 			Series     []chartSeries `json:"series"`
 			Objects    []chartObject `json:"objects"`
+			Scripts    []chartScript `json:"scripts"`
 			Replay     *int64        `json:"replay"`
 			Price      *float64      `json:"price"`
 			Visible    bool          `json:"visible"`
 			At         time.Time     `json:"at"`
 		} `json:"view"`
-		Live       bool           `json:"live"`
-		AgeSeconds int            `json:"age_seconds"`
-		Drawings   []chartDrawing `json:"drawings"`
-		Lab        *chartLab      `json:"lab"`
-		AIDraws    bool           `json:"ai_draws"`
+		Live           bool           `json:"live"`
+		AgeSeconds     int            `json:"age_seconds"`
+		Drawings       []chartDrawing `json:"drawings"`
+		HiddenByReplay int            `json:"hidden_by_replay"`
+		Lab            *chartLab      `json:"lab"`
+		AIDraws        bool           `json:"ai_draws"`
 	}
 )
 
@@ -213,10 +231,14 @@ func describePoints(d chartDrawing) string {
 			return out
 		}
 	}
-	parts := make([]string, 0, len(d.Points))
+	// Every point: a path of the AI's own is at most 20, and it must be able
+	// to read back what it drew. A brush stroke of the user's is not listed
+	// point by point.
+	const all = 24
+	parts := make([]string, 0, min(len(d.Points), all))
 	for i, p := range d.Points {
-		if i == 6 && len(d.Points) > 7 {
-			parts = append(parts, fmt.Sprintf("… %d more", len(d.Points)-6))
+		if i == all-1 && len(d.Points) > all {
+			parts = append(parts, fmt.Sprintf("… %d more, to %s", len(d.Points)-i-1, at(d.Points[len(d.Points)-1])))
 			break
 		}
 		parts = append(parts, at(p))
@@ -290,6 +312,9 @@ func addChartView(s *server.MCPServer, d Deps) {
 		doc.Line("%s.", inView)
 		if v.Replay != nil {
 			doc.Line("The chart is in replay at %s: no bar after it is drawn or listed. Do not look ahead of it with other tools unless the user asks.", chartTime(*v.Replay))
+			if read.HiddenByReplay > 0 {
+				doc.Line("%d drawing(s) placed after the playhead are hidden on the chart while it replays, and are not listed here: they would show where the price went.", read.HiddenByReplay)
+			}
 		} else if v.Price != nil {
 			doc.Line("Last price %s.", render.Px(*v.Price))
 		}
@@ -332,6 +357,28 @@ func addChartView(s *server.MCPServer, d Deps) {
 		}
 		if len(without) > 0 {
 			doc.Line("On the chart without values: %s.", strings.Join(without, "; "))
+		}
+		if len(v.Scripts) > 0 {
+			// Which script, exactly: two can share a name, and the chart may
+			// run one with inputs that are not its defaults.
+			srows := make([][]string, 0, len(v.Scripts))
+			for _, sc := range v.Scripts {
+				inputs := "the script's defaults"
+				if raw := strings.TrimSpace(string(sc.Inputs)); raw != "" && raw != "{}" && raw != "null" {
+					inputs = oneLineJSON(sc.Inputs)
+				}
+				state := "on the chart"
+				if sc.Hidden {
+					state = "hidden (not running)"
+				}
+				version := render.Dash
+				if sc.Version > 0 {
+					version = fmt.Sprint(sc.Version)
+				}
+				srows = append(srows, []string{sc.Ref, orDash(sc.Name), version, inputs, state})
+			}
+			doc.Blank()
+			doc.Table("The user's scripts on the chart (script_open script=<script> version=<version> reads the source the chart runs)", []string{"script", "name", "version", "inputs set on this chart", "state"}, srows, nil)
 		}
 
 		if len(v.Objects) > 0 {
@@ -394,8 +441,10 @@ func addChartDrawingTypes(s *server.MCPServer, d Deps) {
 			return toolErr(err), nil
 		}
 		doc := render.New()
-		doc.Line("Drawing kinds. A drawing is {kind, points: [{time, price}], text?, color?, width?, line_style?}; a position also takes stop and target. " +
-			"time is UTC as chart_view prints it (\"2026-11-16 14:00\") or Unix seconds; put points on bars that exist. color is #rrggbb (left out: your own colour on the chart, so the user tells your drawings from theirs), width 1–4, line_style solid|dashed|dotted.")
+		doc.Line("Drawing kinds. A drawing is {kind, points: [{time, price}], text?, color?, width?, line_style?, text_size?, bold?, italic?}; a position also takes stop and target. " +
+			"time is UTC as chart_view prints it (\"2026-11-16 14:00\") or Unix seconds; put points on bars that exist. color is #rrggbb (left out: your own colour on the chart, so the user tells your drawings from theirs), width 1–4, line_style solid|dashed|dotted. " +
+			"A drawing's text is short: at most 500 characters in a text or a callout, 120 in a label on a line; explain in the chat, mark on the chart. " +
+			"text_size is 8–48 pixels (14 is the usual; 18–24 for a heading, 10–12 for a small note), and bold and italic are true or false: they style the drawing's own text.")
 		for _, t := range types {
 			doc.Blank()
 			doc.Line("## %s (%s): %s", t.Kind, t.Title, t.Description)
@@ -523,23 +572,38 @@ func drawingsPath(venue, pair string) string {
 	return labsAPI + "/charts/" + url.PathEscape(venue) + "/" + url.PathEscape(strings.ReplaceAll(pair, "/", "")) + "/drawings"
 }
 
-// whereSeen says where the user sees a change to their chart.
-func whereSeen(listening int, venue, pair string) string {
+// sameMarket reports whether the chart is on the market named, however the
+// names were written (BTC/USDT, btcusdt).
+func sameMarket(now *chartNow, venue, pair string) bool {
+	norm := func(p string) string { return strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(p), "/", "")) }
+	return now != nil && strings.EqualFold(strings.TrimSpace(now.Venue), strings.TrimSpace(venue)) && norm(now.Pair) == norm(pair)
+}
+
+// whereSeen says where the user sees a change to their chart, from what is
+// known: whether a page of theirs is open, and which market it showed last.
+func whereSeen(listening int, now *chartNow, venue, pair string) string {
 	link := chartLink(venue, pair, "")
-	if listening > 0 {
-		return "The user sees it now on their open chart (" + link + ")."
+	switch {
+	case listening == 0:
+		return "The user's Chart page is not open now: they see it when they open " + link + "."
+	case now == nil:
+		return "The user's Chart page is open; which market it shows is not known (chart_view tells). The drawings are on " + link + "."
+	case !sameMarket(now, venue, pair):
+		return fmt.Sprintf("The user's chart is on %s %s now, so they do not see it yet: chart_focus venue=%s pair=%s takes the chart there, or they open %s.",
+			now.Venue, now.Pair, venue, pair, link)
 	}
-	return "The user's Chart page is not open now: they see it when they open " + link + "."
+	return "The user sees it now on their open chart (" + link + ")."
 }
 
 func addChartDraw(s *server.MCPServer, d Deps) {
 	tool := mcp.NewTool("chart_draw",
 		mcp.WithDescription("Draw on the user's shared chart: levels, trend lines, zones, a trade plan (entry, stop, target), arrows, text. The drawings appear on their chart at once, in your colour and marked as the AI's. "+
 			"Look first (chart_view) and place points on bars and prices that are there; draw a little and label it, then say in the chat what you drew and why. "+
-			"An id replaces that drawing of yours (to move a line); you cannot change the user's drawings. A position is a plan drawn for the user: nothing is ordered. Kinds and their points: chart_drawing_types. Part of Pro."),
+			"An id replaces that drawing of yours (to move a line); you cannot change the user's drawings. A position is a plan drawn for the user: nothing is ordered. Kinds and their points: chart_drawing_types. "+
+			"A text takes text_size (8–48), bold and italic. The venue and the pair must be a market the platform has: copy them from chart_view. Part of Pro; works only while the user shares the chart."),
 		mcp.WithString("venue", mcp.Required(), mcp.Description("The chart's venue as chart_view names it, e.g. binance_futures")),
 		mcp.WithString("pair", mcp.Required(), mcp.Description("The chart's pair as chart_view names it, e.g. BTCUSDT")),
-		mcp.WithArray("drawings", mcp.Required(), mcp.Description(`1–20 drawings, e.g. [{"kind":"horizontal-line","points":[{"price":64250}],"text":"weekly support"},{"kind":"trend-line","points":[{"time":"2026-11-12 10:00","price":63100},{"time":"2026-11-14 16:00","price":64250}]},{"kind":"long-position","points":[{"time":"2026-11-16 14:00","price":64250},{"time":"2026-11-18 14:00"}],"stop":63600,"target":65900}]`),
+		mcp.WithArray("drawings", mcp.Required(), mcp.Description(`1–20 drawings, e.g. [{"kind":"horizontal-line","points":[{"price":64250}],"text":"weekly support"},{"kind":"trend-line","points":[{"time":"2026-11-12 10:00","price":63100},{"time":"2026-11-14 16:00","price":64250}]},{"kind":"text","points":[{"time":"2026-11-14 16:00","price":64900}],"text":"Range high","text_size":18,"bold":true},{"kind":"long-position","points":[{"time":"2026-11-16 14:00","price":64250},{"time":"2026-11-18 14:00"}],"stop":63600,"target":65900}]`),
 			mcp.Items(map[string]any{"type": "object"})),
 		additive(false),
 	)
@@ -563,7 +627,8 @@ func addChartDraw(s *server.MCPServer, d Deps) {
 					Kind string `json:"kind"`
 				} `json:"body"`
 			} `json:"drawings"`
-			Listening int `json:"listening"`
+			Listening int       `json:"listening"`
+			Chart     *chartNow `json:"chart"`
 		}
 		if err := d.sendJSON(ctx, "chart_draw", http.MethodPost, client.Research, drawingsPath(venue, pair), map[string]any{"drawings": list}, &out); err != nil {
 			return toolErr(err), nil
@@ -573,13 +638,13 @@ func addChartDraw(s *server.MCPServer, d Deps) {
 			names[i] = fmt.Sprintf("%s (%s)", dr.ID, dr.Body.Kind)
 		}
 		return toolText(fmt.Sprintf("Drew %d on %s %s: %s. %s Keep the ids to move or remove them (chart_draw with id, chart_remove).",
-			len(out.Drawings), venue, pair, strings.Join(names, ", "), whereSeen(out.Listening, venue, pair))), nil
+			len(out.Drawings), venue, pair, strings.Join(names, ", "), whereSeen(out.Listening, out.Chart, venue, pair))), nil
 	})
 }
 
 func addChartRemove(s *server.MCPServer, d Deps) {
 	tool := mcp.NewTool("chart_remove",
-		mcp.WithDescription("Remove your own drawings from the user's chart: the ids given, or all of yours on that market. The user's drawings are theirs: you cannot remove them. Part of Pro."),
+		mcp.WithDescription("Remove your own drawings from the user's chart: the ids given, or all of yours on that market. The user's drawings are theirs: you cannot remove them. Part of Pro; works only while the user shares the chart (with sharing off the chart stays as they left it)."),
 		mcp.WithString("venue", mcp.Required(), mcp.Description("The chart's venue, e.g. binance_futures")),
 		mcp.WithString("pair", mcp.Required(), mcp.Description("The chart's pair, e.g. BTCUSDT")),
 		mcp.WithArray("ids", mcp.Description("Ids of your drawings to remove (chart_view lists them, by AI)"), mcp.WithStringItems()),
@@ -600,7 +665,7 @@ func addChartRemove(s *server.MCPServer, d Deps) {
 			var out struct {
 				Removed int `json:"removed"`
 			}
-			if err := d.sendJSON(ctx, "chart_remove", http.MethodDelete, client.Research, drawingsPath(venue, pair)+"?author=ai", nil, &out); err != nil {
+			if err := d.sendQuery(ctx, "chart_remove", http.MethodDelete, client.Research, drawingsPath(venue, pair), url.Values{"author": {"ai"}}, nil, &out); err != nil {
 				return toolErr(err), nil
 			}
 			return toolText(fmt.Sprintf("Removed your %d drawing(s) from %s %s. The user's drawings are untouched.", out.Removed, venue, pair)), nil
@@ -665,19 +730,24 @@ func addChartFocus(s *server.MCPServer, d Deps) {
 		if (at != 0) != (price != 0) {
 			return toolErr(fmt.Errorf("chart_focus: point_time and point_price come together")), nil
 		}
+		label := strings.TrimSpace(req.GetString("label", ""))
+		if n := len([]rune(label)); n > focusLabelMax {
+			return toolErr(fmt.Errorf("chart_focus: label is %d characters; at most %d. Say the rest in the chat", n, focusLabelMax)), nil
+		}
+		if label != "" && at == 0 {
+			return toolErr(fmt.Errorf("chart_focus: a label goes with a point (point_time and point_price)")), nil
+		}
 		if at != 0 {
-			body["point"] = map[string]any{"time": at, "price": price, "label": req.GetString("label", "")}
+			body["point"] = map[string]any{"time": at, "price": price, "label": label}
 		}
 		var out struct {
-			Delivered bool `json:"delivered"`
+			Delivered bool      `json:"delivered"`
+			Chart     *chartNow `json:"chart"`
 		}
 		if err := d.sendJSON(ctx, "chart_focus", http.MethodPost, client.Research, labsAPI+"/chart/focus", body, &out); err != nil {
 			return toolErr(err), nil
 		}
-		if !out.Delivered {
-			return toolText("The user's Chart page is not open now. The request waits 10 minutes: it reaches their chart if they open " + chartSite + " in that time. Tell them to open it."), nil
-		}
-		return toolText("Sent to the user's chart. With \"Follow my AI\" on it is showing it now; with it off they got a button to go there. chart_view tells what the chart shows after."), nil
+		return toolText(focusResult(out.Delivered, out.Chart)), nil
 	})
 }
 
@@ -706,17 +776,55 @@ func addChartReplay(s *server.MCPServer, d Deps) {
 		if n := req.GetInt("bars", 0); n != 0 {
 			body["bars"] = n
 		}
-		if err := d.sendJSON(ctx, "chart_replay", http.MethodPost, client.Research, labsAPI+"/chart/replay", body, nil); err != nil {
+		var out struct {
+			Chart *chartNow `json:"chart"`
+		}
+		if err := d.sendJSON(ctx, "chart_replay", http.MethodPost, client.Research, labsAPI+"/chart/replay", body, &out); err != nil {
 			return toolErr(err), nil
 		}
-		switch strings.ToLower(strings.TrimSpace(action)) {
-		case "start":
-			return toolText(fmt.Sprintf("The user's chart is asked to replay from %s. chart_view shows it up to the playhead; chart_replay action=step plays on.", chartTime(at))), nil
-		case "step":
-			return toolText(fmt.Sprintf("Played %d bar(s) on the user's chart. chart_view shows the new bars.", max(req.GetInt("bars", 1), 1))), nil
-		}
-		return toolText("The user's chart is asked to leave the replay and show the live market."), nil
+		return toolText(replayResult(strings.ToLower(strings.TrimSpace(action)), at, max(req.GetInt("bars", 1), 1), out.Chart)), nil
 	})
+}
+
+// focusLabelMax is the longest label a pointer carries.
+const focusLabelMax = 80
+
+// focusResult says what a focus request led to, from what is known: whether a
+// page took it, and whether that page follows the AI.
+func focusResult(delivered bool, now *chartNow) string {
+	switch {
+	case !delivered:
+		return "The user's Chart page is not open now. The request waits 10 minutes: it reaches their chart if they open " + chartSite + " in that time. Tell them to open it."
+	case now != nil && now.Follow != nil && *now.Follow:
+		return "Sent. \"Follow my AI\" is on, so the chart is going there; a new market or older bars take a moment to load. Look with chart_view before you say what it shows."
+	case now != nil && now.Follow != nil:
+		return "Sent. \"Follow my AI\" is off: the user got a button to go there, and the chart stays where it is until they press it. Tell them where to look."
+	}
+	return "Sent to the user's chart. With \"Follow my AI\" on it goes there; with it off the user got a button to go. chart_view tells what the chart shows."
+}
+
+// replayResult says where the replay is after a request, as the page answered
+// (now is nil when it did not answer in time): never what was only asked for.
+func replayResult(action string, at int64, bars int, now *chartNow) string {
+	switch action {
+	case "start":
+		if now != nil && now.Replay != nil {
+			return fmt.Sprintf("The chart is replaying: the playhead is at %s, and no bar after it is drawn. chart_view shows it up to there; chart_replay action=step plays on.", chartTime(*now.Replay))
+		}
+		return fmt.Sprintf("Asked the chart to replay from %s. It is not replaying yet (older bars may still be loading): look with chart_view before you go on.", chartTime(at))
+	case "step":
+		if now != nil && now.Replay != nil {
+			return fmt.Sprintf("Played %d bar(s): the replay is now at %s. chart_view shows the new bars.", bars, chartTime(*now.Replay))
+		}
+		return fmt.Sprintf("Asked the chart to play %d bar(s); it did not say where the replay is now. Look with chart_view.", bars)
+	}
+	switch {
+	case now == nil:
+		return "Asked the chart to leave the replay; it did not confirm. Look with chart_view."
+	case now.Replay != nil:
+		return fmt.Sprintf("Asked the chart to leave the replay, and it is still replaying at %s. Look with chart_view.", chartTime(*now.Replay))
+	}
+	return "The chart left the replay and shows the live market again."
 }
 
 func addChartSnapshot(s *server.MCPServer, d Deps) {

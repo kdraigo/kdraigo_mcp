@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 
@@ -26,7 +27,17 @@ func httpErr(name string, status int, body []byte) error {
 // sendJSON is a signed request with a JSON body (nil for none), decoded into
 // out (nil to ignore the answer).
 func (d Deps) sendJSON(ctx context.Context, name, method string, svc client.ServicePrefix, path string, body, out any) error {
-	resp, status, err := d.HTTP.Do(ctx, true, client.HeaderStyleStandard, method, svc, path, nil, body)
+	return d.sendQuery(ctx, name, method, svc, path, nil, body, out)
+}
+
+// sendQuery is sendJSON with a query. The query is signed apart from the
+// path, so one written into the path makes a signature no server accepts
+// (chart_remove all=true answered 401 that way in v1.35.0): it is refused here.
+func (d Deps) sendQuery(ctx context.Context, name, method string, svc client.ServicePrefix, path string, q url.Values, body, out any) error {
+	if strings.Contains(path, "?") {
+		return fmt.Errorf("%s: internal error: the query is in the path %q; pass it as url.Values", name, path)
+	}
+	resp, status, err := d.HTTP.Do(ctx, true, client.HeaderStyleStandard, method, svc, path, q, body)
 	if err != nil {
 		return fmt.Errorf("%s: %w", name, err)
 	}
