@@ -224,6 +224,12 @@ func TestChartDrawAndRemove(t *testing.T) {
 	out, _ = call(t, s, "chart_draw", map[string]any{"venue": "binance_futures", "pair": "BTCUSDT", "drawings": []any{map[string]any{"kind": "horizontal-line", "points": []any{map[string]any{"price": 1}}}}})
 	assert.Contains(t, out, "The user's chart is on bybit_futures BTCUSDT now, so they do not see it yet: chart_focus venue=binance_futures pair=BTCUSDT takes the chart there")
 	assert.NotContains(t, out, "sees it now")
+	// Another open Chart page shows that market: the user sees it there (bug 49).
+	chartIs = map[string]any{"venue": "bybit_futures", "pair": "BTCUSDT", "timeframe": "4h",
+		"other_pages": []any{map[string]any{"venue": "binance_futures", "pair": "BTCUSDT", "timeframe": "1h"}}}
+	out, _ = call(t, s, "chart_draw", map[string]any{"venue": "binance_futures", "pair": "BTC/USDT", "drawings": []any{map[string]any{"kind": "horizontal-line", "points": []any{map[string]any{"price": 1}}}}})
+	assert.Contains(t, out, "The user sees it on their other open Chart page (binance_futures BTCUSDT 1h, behind the one in front); the page in front shows bybit_futures BTCUSDT. Do not move the chart for it.")
+	assert.NotContains(t, out, "do not see it yet")
 	chartIs = nil
 	out, _ = call(t, s, "chart_draw", map[string]any{"venue": "binance_futures", "pair": "BTCUSDT", "drawings": []any{map[string]any{"kind": "horizontal-line", "points": []any{map[string]any{"price": 1}}}}})
 	assert.Contains(t, out, "which market it shows is not known")

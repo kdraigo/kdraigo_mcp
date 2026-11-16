@@ -109,6 +109,8 @@ type (
 		Replay     *int64 `json:"replay"`
 		Follow     *bool  `json:"follow"`
 		AgeSeconds int    `json:"age_seconds"`
+		// OtherPages: the user's other open Chart pages (with several open).
+		OtherPages []otherPage `json:"other_pages"`
 	}
 	chartRead struct {
 		Sharing bool   `json:"sharing"`
@@ -650,6 +652,16 @@ func whereSeen(listening int, now *chartNow, venue, pair string) string {
 	case now == nil:
 		return "The user's Chart page is open; which market it shows is not known (chart_view tells). The drawings are on " + link + "."
 	case !sameMarket(now, venue, pair):
+		for _, o := range now.OtherPages {
+			if sameMarket(&chartNow{Venue: o.Venue, Pair: o.Pair}, venue, pair) {
+				where := "behind the one in front"
+				if o.Visible {
+					where = "in another window or on another device"
+				}
+				return fmt.Sprintf("The user sees it on their other open Chart page (%s %s %s, %s); the page in front shows %s %s. Do not move the chart for it.",
+					o.Venue, o.Pair, o.Timeframe, where, now.Venue, now.Pair)
+			}
+		}
 		return fmt.Sprintf("The user's chart is on %s %s now, so they do not see it yet: chart_focus venue=%s pair=%s takes the chart there, or they open %s.",
 			now.Venue, now.Pair, venue, pair, link)
 	}
