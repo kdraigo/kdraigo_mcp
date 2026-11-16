@@ -136,8 +136,63 @@ type (
 		HiddenByReplay int            `json:"hidden_by_replay"`
 		Lab            *chartLab      `json:"lab"`
 		AIDraws        bool           `json:"ai_draws"`
+		// Pages is how many of the user's Chart pages are open; with several the
+		// view is one of them, and OtherPages says what the rest show.
+		Pages      int         `json:"pages"`
+		PageOld    bool        `json:"page_old"`
+		OtherPages []otherPage `json:"other_pages"`
+	}
+	otherPage struct {
+		Venue     string `json:"venue"`
+		Pair      string `json:"pair"`
+		Timeframe string `json:"timeframe"`
+		Visible   bool   `json:"visible"`
+		Old       bool   `json:"old"`
 	}
 )
+
+// pagesNote says which of the user's open Chart pages an answer is from and
+// what the others show: with several open, "my chart" may be another one.
+func pagesNote(read *chartRead) string {
+	if read.Pages < 2 || read.View == nil {
+		return ""
+	}
+	which := "the one they used last (none is in front)"
+	switch {
+	case !read.Live:
+		which = "the last snapshot of the one they used last"
+	case read.View.Visible:
+		which = "the one in front"
+	}
+	note := fmt.Sprintf("The user has %d Chart pages open; this is %s.", read.Pages, which)
+	others := make([]string, 0, len(read.OtherPages))
+	for _, o := range read.OtherPages {
+		s := fmt.Sprintf("%s %s %s", o.Venue, o.Pair, o.Timeframe)
+		var marks []string
+		if o.Visible {
+			marks = append(marks, "also in front: another window or device")
+		}
+		if o.Old {
+			marks = append(marks, "loaded before the page's last update")
+		}
+		if len(marks) > 0 {
+			s += " (" + strings.Join(marks, "; ") + ")"
+		}
+		others = append(others, s)
+	}
+	switch len(others) {
+	case 0:
+	case 1:
+		note += " The other shows " + others[0] + "."
+	default:
+		note += " The others show: " + strings.Join(others, ", ") + "."
+	}
+	return note + " chart_focus and chart_replay move only the page read here. If the user means another one, ask them to bring it to the front, then look again."
+}
+
+// pageOldNote: the page that answered runs code from before a release.
+const pageOldNote = "This Chart page was loaded before the page's last update, so parts of this answer can be missing or wrong (the scripts on the chart, the drawings a replay hides, the range after chart_focus). " +
+	"Ask the user to reload the page (an open tab does not update itself), then look again."
 
 // chartTime writes a chart time as the tools take it back: UTC to the minute.
 func chartTime(unix int64) string {
@@ -291,6 +346,12 @@ func addChartView(s *server.MCPServer, d Deps) {
 				age(read.AgeSeconds), render.Time(v.At))
 		}
 		doc.Line("%s.", head)
+		if read.PageOld {
+			doc.Line(pageOldNote)
+		}
+		if note := pagesNote(&read); note != "" {
+			doc.Line("%s", note)
+		}
 
 		limit := req.GetInt("bars", chartBarsDefault)
 		if limit < 1 {

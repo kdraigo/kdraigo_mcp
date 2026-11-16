@@ -87,6 +87,32 @@ func TestChartView(t *testing.T) {
 	assert.Contains(t, out, "the newest 1 are below (bars=3 for more)")
 	assert.NotContains(t, out, "2026-11-12 11:00\t")
 
+	assert.NotContains(t, out, "Chart pages open")
+	assert.NotContains(t, out, "loaded before")
+
+	// Several Chart pages open: which one this is, and what the others show.
+	read["pages"] = 3
+	read["other_pages"] = []any{
+		map[string]any{"venue": "bybit_futures", "pair": "BTCUSDT", "timeframe": "4h", "visible": true},
+		map[string]any{"venue": "binance_futures", "pair": "ETHUSDT", "timeframe": "15m", "old": true},
+	}
+	out, _ = call(t, s, "chart_view", nil)
+	assert.Contains(t, out, "The user has 3 Chart pages open; this is the one in front. The others show: bybit_futures BTCUSDT 4h (also in front: another window or device), "+
+		"binance_futures ETHUSDT 15m (loaded before the page's last update). chart_focus and chart_replay move only the page read here.")
+	read["view"].(map[string]any)["visible"] = false
+	read["pages"], read["other_pages"] = 2, []any{map[string]any{"venue": "bybit_futures", "pair": "BTCUSDT", "timeframe": "4h"}}
+	out, _ = call(t, s, "chart_view", nil)
+	assert.Contains(t, out, "The user has 2 Chart pages open; this is the one they used last (none is in front). The other shows bybit_futures BTCUSDT 4h.")
+	// The page that answered is from before a release: say so, and what to do.
+	read["page_old"] = true
+	out, _ = call(t, s, "chart_view", nil)
+	assert.Contains(t, out, "This Chart page was loaded before the page's last update")
+	assert.Contains(t, out, "Ask the user to reload the page")
+	read["view"].(map[string]any)["visible"] = true
+	delete(read, "page_old")
+	delete(read, "other_pages")
+	delete(read, "pages")
+
 	// A page that did not answer: the snapshot it left, and how old it is.
 	read["live"], read["age_seconds"], read["ai_draws"] = false, 240, false
 	delete(read, "lab")
