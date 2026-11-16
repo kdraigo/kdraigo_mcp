@@ -33,6 +33,7 @@ var guideTopics = []guideTopic{
 	{"live", "Live bots", "reading live bots, read only"},
 	{"boards", "Boards", "desks of widgets"},
 	{"scripts", "Chart scripts and alerts", "kdscript indicators, drawn zones, Telegram alerts"},
+	{"chart", "The shared chart", "reading the user's chart with its indicators, drawing on it, lessons with replay, the session log"},
 	{"publishing", "Publishing and files", "experiment_publish, Obsidian vault"},
 	{"pitfalls", "Pitfalls", "look-ahead, in-sample selection, multiple comparisons, cloud file rules"},
 	{"conventions", "Conventions that make the tools more useful", "order reasons, reason.stop, stops"},
@@ -115,7 +116,7 @@ const localPreface = `This is the local kdraigo MCP server. Strategies run in th
 const coreInstructions = `
 Start here
 - When the user is new, or asks what kdraigo can do: get_started (their plan, limits, what they have, which tool each task starts with).
-- Before a task, read its part of the guide: get_guide topic=loop, workspace, labs, judging, validation, live, boards, scripts, pitfalls (no topic lists them). Read judging and validation before you report on a result.
+- Before a task, read its part of the guide: get_guide topic=loop, workspace, labs, judging, validation, live, boards, scripts, chart, pitfalls (no topic lists them). Read judging and validation before you report on a result.
 
 Always
 1. Research lives in labs: lab_open first (lab_list names them), lab_check before spending a run, lab_handoff at the end.
@@ -128,6 +129,7 @@ Always
 8. Live bots are read only: flag a DISCONNECTED bot or a position without a stop; stopping or changing one is the user's to do.
 9. Workspace files: read before writing, send the whole file, pass base_version; keys come from the run's environment, never from code.
 10. Arm alerts, publish or share only what the user asked for.
+11. The user's chart: you see it only through chart_view, so call it each time they ask about it and quote its numbers; a trade plan is a drawing, never an order.
 
 Answer with the two or three numbers that decide the question, then the warning that qualifies them, then the next step.`
 

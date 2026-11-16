@@ -166,6 +166,12 @@ Results come back as a few header lines and tab-separated tables, with no JSON, 
 | `alert_create` | Arm one of a script's `alertcondition(…)` (by title) on a pair and timeframe: checked after each closed bar, its message goes to the user's Telegram while it is true. Verified 5 alerts ≥ 15m for 30 days, pro 50 ≥ 5m for 90 days. |
 | `alert_list` | The user's alerts (active, paused with the reason, expired) and their recent events. |
 | `alert_renew` / `alert_delete` | Renew an expired alert, or a paused one once fixed; delete one. |
+| `chart_view` | The user's shared chart as it is now: the bars in view with every indicator's value at each bar, what scripts drew, and the drawings (theirs and the AI's). |
+| `chart_drawing_types` | The kinds of drawing the AI may make, with their points and an example. |
+| `chart_draw` / `chart_remove` | Draw on the user's chart (levels, lines, zones, a trade plan, text), shown at once and marked as the AI's; remove the AI's own drawings. Pro. |
+| `chart_focus` | Ask the chart to show a market, a timeframe or a time range, and point at a bar with a few words. Pro. |
+| `chart_replay` | Drive the chart's replay: start at a time, step bars, exit. Pro. |
+| `chart_snapshot` | Save the chart as it is and get a link that opens it that way again, for a lab note. Pro. |
 | `create_backtest_session` | Replay only (`KDRAIGO_MCP_ENABLE_REPLAY=1`): creates a session on backtester_engine. |
 | `run_backtest_stream` | Replay only: steps a session to its end over WS without running strategy code. |
 
@@ -190,6 +196,12 @@ What other people wrote reaches the AI marked as data, never instructions. Anyth
 ## Boards
 
 A **board** is the user's arrangement of widgets on the website (`kdraigo.com/boards`): price charts with lines and panes (volume, and the collected market data: delta, CVD, large trades, buy and sell volume, and on perpetuals funding, open interest, long/short and liquidations) and optionally a backtest's trades, the live order book, a watchlist, trade flow, positioning, open interest and liquidations widgets, session stats, equity curves, a P&L calendar, a research lab at a glance, notes. A widget is data the website draws, never code: `{type, title, params, at}`, checked on every write against the catalog (`widget_types`). A refusal names the field (`widgets[1] (w2).params.exchange: "binance_futures" is not one of binance, bybit`); fix it and call again. The widget tools apply to the newest version of the board, and a board open on the website updates within seconds. Moving a board into a syndicate is the user's click on the website.
+
+## The shared chart
+
+The user switches on **Share with my AI** on the Chart page (`kdraigo.com/chart`); their AI then reads what that chart shows and draws on it, while they talk in the AI's own app. `chart_view` returns a snapshot the page builds at that moment: the market and timeframe, the bars in view, the value of every indicator on the chart at each bar (standard indicators, the user's scripts and the market data rows are all computed in the browser, so the page is the only source of the numbers the user sees), the zones, lines and labels scripts drew, and the drawings. When the page cannot answer (a phone with the AI's app in front), the snapshot it sent on going to the background is returned with its age.
+
+The AI sees the chart when it calls `chart_view`, never by itself: an AI app runs only when the user writes to it. What the AI draws (`chart_draw`, from the catalog in `chart_drawing_types`) appears on the open chart at once, in the AI's colour; it changes and removes only its own drawings. `chart_focus` moves the chart and points at a bar, `chart_replay` drives the replay for a lesson, and `chart_snapshot` saves the chart for a lab note. A trade plan is a drawing (`long-position`, `short-position`): no tool places an order. Reading the chart is on every plan; the tools that change it are part of Pro. With sharing off, every chart tool says so and nothing is read.
 
 ## Chart scripts
 

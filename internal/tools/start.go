@@ -65,6 +65,7 @@ var startIntents = [][2]string{
 	{"Is my live bot still its backtest?", "get_live_cone (the backtest's range of paths), get_live_drift (slippage, missed trades)"},
 	{"Did my change help?", "compare_sessions a=<baseline> b=<change> (Sharpe difference on the same days)"},
 	{"A desk of charts and data", "widget_types, board_create, widget_add"},
+	{"Look at my chart with me, mark it up, or teach me on it", "get_guide topic=chart, chart_view (the user shares it on kdraigo.com/chart), chart_draw, chart_focus"},
 	{"A custom indicator or a Telegram alert", "script_library_search, script_reference, script_save, alert_create"},
 	{"Market data", "get_data_coverage (what exists), get_candles, get_flow, get_positioning"},
 }

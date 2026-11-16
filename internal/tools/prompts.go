@@ -95,6 +95,45 @@ var workflows = []workflow{
 		},
 	},
 	{
+		name:  "chart_together",
+		about: "Look at my chart with me: read it, check my drawings against the data, mark it up",
+		args:  []promptArg{{"question", "What I want to know about the chart; empty: your reading of it", false}},
+		text: func(a map[string]string) string {
+			q := "Give me your reading of it"
+			if a["question"] != "" {
+				q = "My question: " + a["question"]
+			}
+			return "I am sharing my chart with you (kdraigo.com/chart, \"Share with my AI\"). Read get_guide topic=chart, then look with chart_view. " + q + ". " +
+				"Quote the prices, times and indicator values you rely on, check my drawings against what the bars did at them, and draw only what helps (a few labelled drawings), saying what you drew. " +
+				"If we find an idea worth keeping, note it in the lab the session logs to and propose how to test it; run nothing until I agree."
+		},
+	},
+	{
+		name:  "chart_trade_review",
+		about: "Before I trade: the chart, my plan and my live bots, looked at together",
+		args:  []promptArg{{"plan", "The trade I am thinking of, in a sentence; empty: ask me", false}},
+		text: func(a map[string]string) string {
+			plan := "Ask me what trade I am thinking of."
+			if a["plan"] != "" {
+				plan = "My plan: " + a["plan"]
+			}
+			return "I am sharing my chart with you (kdraigo.com/chart). Read get_guide topic=chart and topic=live, look with chart_view, and check my live bots (list_live_sessions) for positions already open on this market. " + plan + " " +
+				"Draw the plan as a position (entry, stop, target) with its risk to reward, tell me what on the chart supports it and what speaks against it, and where it is wrong (the invalidation). " +
+				"You place no orders and change no bot: the decision is mine. Save the chart with chart_snapshot and note the plan in the session's lab, so we can look back at it."
+		},
+	},
+	{
+		name:  "chart_lesson",
+		about: "Teach me a trading topic on my chart, with past examples and replay",
+		args:  []promptArg{{"topic", "What to learn, e.g. market structure, support and resistance, reading RSI divergence", true}},
+		text: func(a map[string]string) string {
+			return fmt.Sprintf("Teach me on my chart: %s. I am sharing it with you (kdraigo.com/chart). Read get_guide topic=chart, then look with chart_view. "+
+				"Go in small steps: explain one thing in a few sentences, show it on a real past example (chart_focus to go there, a few labelled drawings), then test me: "+
+				"start a replay before the next example (chart_replay), ask what I expect, step the bars and look again. Say plainly when a pattern failed, and how often such things work is a question for a backtest, not for an example. "+
+				"Keep a short note of what we covered in the session's lab.", a["topic"])
+		},
+	},
+	{
 		name:  "build_a_desk",
 		about: "A board of charts and market data for a market or a theme",
 		args:  []promptArg{{"theme", "What the desk is for, e.g. BTC futures intraday, or US tech stocks", true}},
