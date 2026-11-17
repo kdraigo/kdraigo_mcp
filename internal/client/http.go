@@ -36,6 +36,9 @@ const (
 	// Live is live_trades: what the user's live bots report (sessions,
 	// orders, balances, order reasoning), read only.
 	Live ServicePrefix = "/live"
+	// Billing is billing_service: its public price list, read without a
+	// signature.
+	Billing ServicePrefix = "/billing"
 )
 
 // HeaderStyle selects which header names carry the Ed25519 signature.

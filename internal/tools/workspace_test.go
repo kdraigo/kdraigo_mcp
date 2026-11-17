@@ -339,7 +339,7 @@ func TestWorkspaceRun_RefusedNamesTheRunGoing(t *testing.T) {
 		wsRoute("/workspaces/" + wsID + "/runs"): func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodPost {
 				w.WriteHeader(http.StatusTooManyRequests)
-				_, _ = w.Write([]byte(`{"error":"limit reached: your verified account runs 1 at a time; wait for it to end or stop it"}`))
+				_, _ = w.Write([]byte(`{"error":"limit reached: your plus account runs 1 at a time; wait for it to end or stop it"}`))
 				return
 			}
 			jsonReply([]any{
@@ -356,6 +356,8 @@ func TestWorkspaceRun_RefusedNamesTheRunGoing(t *testing.T) {
 	assert.Contains(t, out, "workspace_run_status run_id="+runID)
 	assert.Contains(t, out, "workspace_stop")
 	assert.NotContains(t, out, "Already going")
+	// A Plus limit that Pro raises: the AI is told to offer Pro once.
+	assert.Contains(t, out, "A limit of the user's plan: Pro ($19 a month) raises it (kdraigo.com/pricing; get_started lists what each adds). Tell the user once in this conversation")
 }
 
 // A run refused for its settings says the files need no change; one refused

@@ -67,9 +67,11 @@ func addTimeout(s *server.MCPServer, t mcp.Tool, d time.Duration, h handler) {
 		return
 	}
 	s.AddTool(t, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		ctx, cancel := context.WithTimeout(ctx, d)
+		call, cancel := context.WithTimeout(ctx, d)
 		defer cancel()
-		return h(ctx, req)
+		res, err := h(call, req)
+		// A refusal a higher plan lifts says so (upgrade.go).
+		return withOffer(ctx, res), err
 	})
 }
 

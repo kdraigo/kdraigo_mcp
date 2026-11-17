@@ -59,8 +59,36 @@ func TestGetStarted(t *testing.T) {
 		"- Latest backtest: " + sid + " v1 ema · DONE",
 		"5 markets: binance 2 · binance_futures 3.",
 		"Is this result real?\tvalidate_strategy trials=N",
+		// A server from before Plus says verified: Pro is the plan above it.
+		"## More with a paid plan (kdraigo.com/pricing)\n- Pro ($19 a month): 15 pairs and 1,500,000 bars per backtest",
+		"When the user asks for something their plan does not allow, tell them once which of these allows it, at its price",
 	} {
 		assert.Contains(t, text, want)
+	}
+	assert.NotContains(t, text, "- Plus (")
+}
+
+// Basic sees both paid plans with their prices; Pro and admin see none.
+func TestGetStarted_PaidPlans(t *testing.T) {
+	for tier, want := range map[string][]string{
+		"basic": {"- Plus ($8 a month): 5 pairs and 150,000 bars per backtest", "and the AI drawing, pointing and replaying on up to 3 Chart pages.",
+			"- Pro ($19 a month): 15 pairs"},
+		"plus":  {"- Pro ($19 a month)"},
+		"pro":   nil,
+		"admin": nil,
+	} {
+		routes := startRoutes()
+		routes["/workspace/api/v1/dev/account"] = jsonReply(map[string]any{"account": tier, "tier": tier, "limits": map[string]any{}})
+		s := backend(t, routes)
+		text, isErr := call(t, s, "get_started", nil)
+		require.False(t, isErr, text)
+		if want == nil {
+			assert.NotContains(t, text, "More with a paid plan", tier)
+			continue
+		}
+		for _, w := range want {
+			assert.Contains(t, text, w, tier)
+		}
 	}
 }
 

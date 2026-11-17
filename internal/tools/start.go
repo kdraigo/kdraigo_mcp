@@ -71,7 +71,10 @@ var startIntents = [][2]string{
 }
 
 // RegisterStart adds get_started.
-func RegisterStart(s *server.MCPServer, d Deps) { addGetStarted(s, d) }
+func RegisterStart(s *server.MCPServer, d Deps) {
+	setPriceSource(d.HTTP)
+	addGetStarted(s, d)
+}
 
 func addGetStarted(s *server.MCPServer, d Deps) {
 	tool := mcp.NewTool("get_started",
@@ -153,10 +156,17 @@ func (d Deps) startPage(ctx context.Context) string {
 			doc.Line("Cloud workspace: %d of %d workspaces, %d run(s) at a time on %s, sweeps of up to %d variants, %s.",
 				acct.Usage.Workspaces, l.Workspaces, l.SandboxRuns, machine, l.SweepVariants, runs)
 		} else {
-			doc.Line("Cloud workspace: not on this plan; strategies run locally (scaffold_strategy, go run .). Linking Telegram or signing in with Google opens it.")
+			doc.Line("Cloud workspace: not on this plan; strategies run locally (scaffold_strategy, go run .). Plus and Pro have it, and so does Basic signed in with Google.")
 		}
 		if l.ResearchLabs > 0 {
 			doc.Line("Research labs: up to %d.", l.ResearchLabs)
+		}
+		if more := upgradeLines(ctx, acct.Tier); len(more) > 0 {
+			doc.Blank()
+			doc.Line("## More with a paid plan (%s)", pricingURL)
+			for _, line := range more {
+				doc.Line("%s", line)
+			}
 		}
 	}
 

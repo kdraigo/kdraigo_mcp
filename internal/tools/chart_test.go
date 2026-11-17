@@ -120,7 +120,7 @@ func TestChartView(t *testing.T) {
 	require.False(t, isErr, out)
 	assert.Contains(t, out, "as the user left it 4 min ago (their Chart page did not answer: in the background or closed)")
 	assert.Contains(t, out, "prices after 2026-11-12 12:30 are not in it (get_candles has them)")
-	assert.Contains(t, out, "drawing on it, moving it and saving snapshots are part of Plus and Pro")
+	assert.Contains(t, out, "drawing on it, moving it, replaying it and saving snapshots are part of Plus ($8 a month) and Pro ($19 a month) (kdraigo.com/pricing): do not offer to draw")
 	assert.NotContains(t, out, "logs to lab")
 
 	// In a replay nothing is said of the price now, and what the page hides is not listed.
@@ -142,10 +142,19 @@ func TestChartView(t *testing.T) {
 	assert.NotContains(t, out, "more")
 
 	// Nothing to read: the reason, and what the user does about it.
-	read = map[string]any{"sharing": false, "reason": `the user has not shared their chart. Ask them to open kdraigo.com/chart and switch on "Share with my AI" in the chart's toolbar`, "drawings": []any{}}
+	notShared := `the user has not shared their chart. Ask them to open kdraigo.com/chart and switch on "Share with my AI" in the chart's toolbar`
+	read = map[string]any{"sharing": false, "reason": notShared, "ai_draws": true, "drawings": []any{}}
 	out, isErr = call(t, s, "chart_view", nil)
 	require.False(t, isErr, out)
-	assert.Equal(t, `No chart to read: the user has not shared their chart. Ask them to open kdraigo.com/chart and switch on "Share with my AI" in the chart's toolbar.`, out)
+	assert.Equal(t, "No chart to read: "+notShared+".", out)
+
+	// On a plan whose AI only reads, it hears so before the user goes to
+	// share the chart, so it promises no drawing (bug #52).
+	read = map[string]any{"sharing": false, "reason": notShared, "ai_draws": false, "drawings": []any{}}
+	out, isErr = call(t, s, "chart_view", nil)
+	require.False(t, isErr, out)
+	assert.True(t, strings.HasPrefix(out, "No chart to read: "+notShared+".\n"), out)
+	assert.Contains(t, out, "part of Plus ($8 a month) and Pro ($19 a month) (kdraigo.com/pricing): do not offer to draw")
 }
 
 func TestChartDrawingTypes(t *testing.T) {

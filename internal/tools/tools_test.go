@@ -32,12 +32,22 @@ const sid = "11111111-2222-3333-4444-555555555555"
 var optionalPaths = map[string]bool{"/analytics/api/v1/dev/analytics/significance": true,
 	"/analytics/api/v1/dev/analytics/costs": true, "/analytics/api/v1/dev/analytics/entries": true}
 
+const billingPlansPath = "/billing/api/v1/plans"
+
+const testPlans = `{"plan":"pro","plans":[{"plan":"plus","prices":[{"months":1,"days":30,"usd_cents":800},{"months":3,"days":90,"usd_cents":2400}]},` +
+	`{"plan":"pro","prices":[{"months":1,"days":30,"usd_cents":1900}]}]}`
+
 // backend serves the gateway paths the tools call, each from its own handler;
 // a path with no handler fails the test.
 func backend(t *testing.T, routes map[string]http.HandlerFunc) *server.MCPServer {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h, ok := routes[r.URL.Path]
+		if !ok && r.URL.Path == billingPlansPath {
+			// billing_service's public price list, as production serves it.
+			_, _ = w.Write([]byte(testPlans))
+			return
+		}
 		if !ok && optionalPaths[r.URL.Path] {
 			http.NotFound(w, r) // as an analytics_service without it answers
 			return
@@ -55,7 +65,15 @@ func backend(t *testing.T, routes map[string]http.HandlerFunc) *server.MCPServer
 	require.NoError(t, err)
 	s := server.NewMCPServer("test", "0")
 	Register(s, Deps{HTTP: client.NewHTTP(srv.URL, srv.URL, signer)})
+	resetPrices() // each test reads the price list from its own backend
 	return s
+}
+
+// resetPrices forgets the price list read so far.
+func resetPrices() {
+	priceList.mu.Lock()
+	defer priceList.mu.Unlock()
+	priceList.monthly, priceList.next = nil, time.Time{}
 }
 
 func jsonReply(v any) http.HandlerFunc {

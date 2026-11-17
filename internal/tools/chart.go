@@ -329,7 +329,13 @@ func addChartView(s *server.MCPServer, d Deps) {
 			if reason == "" {
 				reason = "there is no shared chart to read"
 			}
-			return toolText("No chart to read: " + reason + "."), nil
+			text := "No chart to read: " + reason + "."
+			if !read.AIDraws {
+				// Said before the user goes to share it, so the AI does not
+				// promise a drawing it cannot make (bug #52).
+				text += "\n" + chartReadOnlyNote(ctx)
+			}
+			return toolText(text), nil
 		}
 		v := read.View
 		doc := render.New()
@@ -387,7 +393,7 @@ func addChartView(s *server.MCPServer, d Deps) {
 		if read.AIDraws {
 			doc.Line("You can draw on this chart (chart_draw; chart_drawing_types lists the kinds), point at a place or change what it shows (chart_focus), and drive its replay (chart_replay).")
 		} else {
-			doc.Line("On the user's plan you read the chart; drawing on it, moving it and saving snapshots are part of Plus and Pro (kdraigo.com/pricing). Describe levels in words with their prices and times.")
+			doc.Line("%s", chartReadOnlyNote(ctx))
 		}
 		doc.Line(chartText)
 
