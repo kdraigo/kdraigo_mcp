@@ -30,9 +30,9 @@ const pricingURL = "kdraigo.com/pricing"
 // from the AI are left out until they can be placed.
 var planAdds = map[string]string{
 	"plus": "5 pairs and 150,000 bars per backtest, 3 backtests at once, 512 MB of results, the cloud workspace 4 h a day (10 workspaces, 5 research labs), " +
-		"Telegram and chart-script alerts, and the AI drawing, pointing and replaying on up to 3 Chart pages",
+		"5 chart-script alerts on 15m bars or longer for 30 days, and the AI drawing, pointing and replaying on up to 3 Chart pages",
 	"pro": "15 pairs and 1,500,000 bars per backtest, 5 at once, 3 GB of results, a cloud workspace machine of its own 8 h a day (25 workspaces, 25 research labs), " +
-		"and the AI on up to 8 Chart pages",
+		"50 alerts on 5m bars or longer, and the AI on up to 8 Chart pages",
 }
 
 // plansAbove lists the paid plans above a tier, cheapest first.
@@ -167,9 +167,10 @@ func upgradeLines(ctx context.Context, tier string) []string {
 }
 
 // refusedPlan reads which plan a refusal names: "your basic account…",
+// "a plus account's alerts…",
 // "your basic (Google sign-in) account…", "your plus account…", or a feature
 // "part of Plus and Pro (kdraigo.com/pricing)". "" when it names none.
-var refusedPlan = regexp.MustCompile(`your (basic|plus|verified)(?: \(Google sign-in\))? account`)
+var refusedPlan = regexp.MustCompile(`(?:your|a) (basic|plus|verified)(?: \(Google sign-in\))? account`)
 
 func refusalTier(text string) (string, bool) {
 	if m := refusedPlan.FindStringSubmatch(text); m != nil {

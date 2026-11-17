@@ -877,7 +877,7 @@ The cloud workspace builds and runs a strategy on the platform, so nothing is ne
 
 A run's backtest is one of the account's sessions, wherever it was started from. A Google sign-in adds the workspace allowance; its backtests stay basic. Basic accounts also share a pool of 4 running sessions among them all. Bars are counted at the stream's timeframe: 50,000 is about 35 days of 1m or 5.7 years of 1h.
 
-Paying for Plus ($8 a month) or Pro on the website's Account page, or with Telegram Stars in @kdraigo_bot, makes an account plus or pro. Linking Telegram no longer changes the plan (since 2026-11-17, when Plus replaced the free Verified tier): it is how alerts reach the user. An account's newest 50 runs keep their source and output (`workspace_logs`); older runs keep only their record, and records go after 30 days.
+Paying for Plus ($8 a month) or Pro on the website's Account page, or with Telegram Stars in @kdraigo_bot, makes an account plus or pro. Linking Telegram no longer changes the plan (since 2026-11-17, when Plus replaced the free Verified tier): it is how alerts and trade notifications reach the user, on every plan (alerts: basic 2 on 1h or longer, plus 5 on 15m, pro 50 on 5m). An account's newest 50 runs keep their source and output (`workspace_logs`); older runs keep only their record, and records go after 30 days.
 
 ## limits
 

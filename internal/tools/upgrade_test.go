@@ -14,11 +14,13 @@ import (
 func TestRefusalTier(t *testing.T) {
 	for text, want := range map[string]string{
 		"limit reached: 4 pairs, your basic account backtests at most 2 at once; split the pairs (Plus, kdraigo.com/pricing, runs 5 pairs and 150,000 bars per pair)": "basic",
-		"limit reached: your basic (Google sign-in) account keeps at most 3 workspaces; delete one first":                                                               "basic",
-		"limit reached: less than 1m0s of your plus account's workspace time is left today; it renews at 00:00 UTC":                                                     "plus",
-		"forbidden: alerts are part of Plus and Pro (kdraigo.com/pricing); they reach you in Telegram once it is linked on kdraigo.com/account":                         "basic",
-		"limit reached: your pro account runs 5 at once":                                                                                                               "",
-		"workspace: HTTP 404: not found":                                                                                                                                "",
+		"limit reached: your basic (Google sign-in) account keeps at most 3 workspaces; delete one first":                                                             "basic",
+		"limit reached: less than 1m0s of your plus account's workspace time is left today; it renews at 00:00 UTC":                                                   "plus",
+		"invalid: the alert: timeframe: a basic account's alerts run on 1h or longer (Plus, kdraigo.com/pricing, keeps 5 on 15m or longer for 30 days)":               "basic",
+		"forbidden: drawing on the chart is part of Plus and Pro (kdraigo.com/pricing). On this plan the AI reads the shared chart":                                   "basic",
+		"invalid: the alert: timeframe: a plus account's alerts run on 15m or longer (Pro, kdraigo.com/pricing, keeps 50 on 5m or longer for 90 days)":                "plus",
+		"limit reached: your pro account runs 5 at once": "",
+		"workspace: HTTP 404: not found":                 "",
 	} {
 		got, ok := refusalTier(text)
 		assert.Equal(t, want, got, text)
