@@ -387,7 +387,7 @@ func addChartView(s *server.MCPServer, d Deps) {
 		if read.AIDraws {
 			doc.Line("You can draw on this chart (chart_draw; chart_drawing_types lists the kinds), point at a place or change what it shows (chart_focus), and drive its replay (chart_replay).")
 		} else {
-			doc.Line("On the user's plan you read the chart; drawing on it, moving it and saving snapshots are part of Pro (kdraigo.com/pricing). Describe levels in words with their prices and times.")
+			doc.Line("On the user's plan you read the chart; drawing on it, moving it and saving snapshots are part of Plus and Pro (kdraigo.com/pricing). Describe levels in words with their prices and times.")
 		}
 		doc.Line(chartText)
 

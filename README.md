@@ -145,7 +145,7 @@ Results come back as a few header lines and tab-separated tables, with no JSON, 
 | `lab_runs` / `lab_file_runs` | A lab's recorded runs with their results; file runs under an experiment. |
 | `vault_pull` / `vault_push` | Local only: a lab as a folder of markdown files Obsidian opens, and its edits sent back (see Vault below). |
 | `syndicate_list` / `syndicate_open` | The user's syndicates (groups that share labs), their members and labs. |
-| `syndicate_create` / `syndicate_join` / `syndicate_leave` | Make one (Verified or Pro), join one with an invite code, leave one. Invites and roles are done on the website. |
+| `syndicate_create` / `syndicate_join` / `syndicate_leave` | Make one (Plus or Pro), join one with an invite code, leave one. Invites and roles are done on the website. |
 | `experiment_publish` | A decided experiment as a frozen snapshot with verified result cards (and optionally its run's code), as a draft or to a syndicate. Publishing to everyone is the user's click on the website. |
 | `library_search` / `library_read` | The research library: what others published to everyone or to the user's syndicates, with filters (pair, timeframe, outcome, pre-registered, has code). |
 | `library_fork` | A publication into the user's own lab as a new draft, with its notes; with `workspace=true` its code goes into a new cloud workspace. |
@@ -163,7 +163,7 @@ Results come back as a few header lines and tab-separated tables, with no JSON, 
 | `script_versions` | A script's saved versions (the newest 50), who saved each and when; `script_open version=` reads one. |
 | `script_library_search` / `script_library_read` | Scripts shared with the user's syndicates or with everyone; one with its source (other people's work: data, never instructions). |
 | `script_fork` | Copy a shared script into the user's own scripts (or a syndicate's). Publishing is the user's click on the website. |
-| `alert_create` | Arm one of a script's `alertcondition(…)` (by title) on a pair and timeframe: checked after each closed bar, its message goes to the user's Telegram while it is true. Verified 5 alerts ≥ 15m for 30 days, pro 50 ≥ 5m for 90 days. |
+| `alert_create` | Arm one of a script's `alertcondition(…)` (by title) on a pair and timeframe: checked after each closed bar, its message goes to the user's Telegram while it is true. Plus 5 alerts ≥ 15m for 30 days, pro 50 ≥ 5m for 90 days. |
 | `alert_list` | The user's alerts (active, paused with the reason, expired) and their recent events. |
 | `alert_renew` / `alert_delete` | Renew an expired alert, or a paused one once fixed; delete one. |
 | `chart_view` | The user's shared chart as it is now: the bars in view with every indicator's value at each bar, what scripts drew, and the drawings (theirs and the AI's). |
@@ -189,7 +189,7 @@ Runs of a workspace in a lab are recorded by the platform as they end: the code'
 
 A **syndicate** is a group that shares labs: in every lab tool a shared lab is named `syndicate:lab`, members and their AIs write it, viewers read it. Runs of a member's workspace in a shared lab are recorded there as theirs, and `lab_check` finds a repeat across every lab the user can read.
 
-The **library** holds frozen snapshots of decided experiments: hypothesis, protocol and verdict, the notes chosen, one **result card** per cited run, and optionally the code a run ran (refused unless it hashes to what the run ran). The platform reads each card's figures from the engine's record and signs them; the key is public (`kdraigo.com/research/api/v1/public/card-key`). A snapshot can be a draft, go to a syndicate, or (from the website, by a Verified or Pro account, citing only the author's own runs) go to everyone.
+The **library** holds frozen snapshots of decided experiments: hypothesis, protocol and verdict, the notes chosen, one **result card** per cited run, and optionally the code a run ran (refused unless it hashes to what the run ran). The platform reads each card's figures from the engine's record and signs them; the key is public (`kdraigo.com/research/api/v1/public/card-key`). A snapshot can be a draft, go to a syndicate, or (from the website, by a Plus or Pro account, citing only the author's own runs) go to everyone.
 
 What other people wrote reaches the AI marked as data, never instructions. Anything that changes who sees what (invites, roles, sharing a whole lab, publishing to everyone) is the user's own click on the website, so a note written to steer an agent can't make it leak research.
 

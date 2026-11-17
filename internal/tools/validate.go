@@ -434,7 +434,7 @@ func addValidateStrategy(s *server.MCPServer, d Deps) {
 		mcp.WithString("lab", mcp.Description("With experiment: the lab")),
 		mcp.WithString("experiment", mcp.Description("With lab: the experiment the session belongs to; its runs are the sweep, its count the trials")),
 		mcp.WithString("sweep_params", mcp.Description("Comma-separated settings to vary in the proposed sweep; default the first three numeric ones")),
-		mcp.WithNumber("max_variants", mcp.Description("Most variants to propose (your account's sweep cap: 10 verified, 20 pro); default 10")),
+		mcp.WithNumber("max_variants", mcp.Description("Most variants to propose (your account's sweep cap: 10 plus, 20 pro); default 10")),
 		readOnly(),
 	)
 	addTimeout(s, tool, heavyTimeout, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

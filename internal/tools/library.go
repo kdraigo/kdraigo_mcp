@@ -146,7 +146,7 @@ func addSyndicateList(s *server.MCPServer, d Deps) {
 			return toolErr(err), nil
 		}
 		if len(list) == 0 {
-			return toolText("No syndicates. Join one with an invite code (syndicate_join), or create one (syndicate_create; Verified or Pro accounts)."), nil
+			return toolText("No syndicates. Join one with an invite code (syndicate_join), or create one (syndicate_create; Plus or Pro accounts)."), nil
 		}
 		rows := make([][]string, 0, len(list))
 		for _, m := range list {
@@ -196,7 +196,7 @@ func addSyndicateOpen(s *server.MCPServer, d Deps) {
 
 func addSyndicateCreate(s *server.MCPServer, d Deps) {
 	tool := mcp.NewTool("syndicate_create",
-		mcp.WithDescription("Create a syndicate the user owns: a group that shares labs. Needs a Verified or Pro account. Inviting people is done on the website."),
+		mcp.WithDescription("Create a syndicate the user owns: a group that shares labs. Needs a Plus or Pro account. Inviting people is done on the website."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("The syndicate's name; its address (slug) is made from it and is unique across kdraigo")),
 		mcp.WithString("display_name", mcp.Required(), mcp.Description("The name the other members will see of the user (never their wallet or email)")),
 		additive(false),

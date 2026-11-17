@@ -421,7 +421,7 @@ func fileErr(name, arg, path string, status int, body []byte) error {
 func addWorkspaceBuild(s *server.MCPServer, d Deps) {
 	tool := mcp.NewTool("workspace_build",
 		mcp.WithDescription("Compile a workspace on a sandbox machine without running it: the fast check after an edit. Returns the import check's or the compiler's errors as file:line: message, and go vet and staticcheck warnings. A workspace with _test.go files has its tests run too (offline, 1 min at most); a failing test fails the build with go test's output. "+
-			"A machine that has to start takes about 40 s; on a verified account a full shared pool queues the build."),
+			"A machine that has to start takes about 40 s; on a Plus account a full shared pool queues the build."),
 		mcp.WithString("workspace_id", mcp.Required(), mcp.Description("Workspace UUID")),
 		mcp.WithNumber("wait", mcp.Description("Seconds to wait for the result, at most 170"), mcp.DefaultNumber(defaultBuildWait.Seconds())),
 		additive(false),
@@ -448,7 +448,7 @@ func addWorkspaceRun(s *server.MCPServer, d Deps) {
 		mcp.WithObject("env", mcp.Description("Environment variables for the strategy, name → value. A name that no parameter declares and no file names is refused before the run starts, with the parameter it most likely meant: a misspelt setting would otherwise run its default.")),
 		mcp.WithBoolean("smoke", mcp.Description("Run the first 7 days first, then the full run (or the sweep: its first variant) if that passed (dev_sdk v1.9.0 and later)")),
 		mcp.WithString("stress", mcp.Description("standard: a cost stress sweep of 6 variants on one build: as is, fees ×1.5, fees ×2, 5 bp and 10 bp slippage on every taker fill, funding off (dev_sdk v1.10.0 and later; 6 runs)"), mcp.Enum("standard")),
-		mcp.WithArray("variants", mcp.Description("A sweep: 2 or more objects of settings (name → value), e.g. [{\"STOP_ATR\":\"1.5\"},{\"STOP_ATR\":\"2\"}]; at most 10 (verified), 20 (pro), 50 (admin)"),
+		mcp.WithArray("variants", mcp.Description("A sweep: 2 or more objects of settings (name → value), e.g. [{\"STOP_ATR\":\"1.5\"},{\"STOP_ATR\":\"2\"}]; at most 10 (plus), 20 (pro), 50 (admin)"),
 			mcp.Items(map[string]any{"type": "object"})),
 		mcp.WithNumber("wait", mcp.Description("Seconds to wait for the run to end, at most 170 (60 on the hosted server)"), mcp.DefaultNumber(defaultRunWait.Seconds())),
 		additive(false),

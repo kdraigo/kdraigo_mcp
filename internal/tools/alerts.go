@@ -104,7 +104,7 @@ func addAlertList(s *server.MCPServer, d Deps) {
 
 func addAlertCreate(s *server.MCPServer, d Deps) {
 	tool := mcp.NewTool("alert_create",
-		mcp.WithDescription("Arm a script alert: one of a saved script's alertcondition(…) (by its title) on a pair and timeframe. The platform checks it after each closed bar and sends its message to the user's Telegram while it is true; it never fires on a forming bar. It follows the script's newest saved version. Plans: verified 5 active alerts on 15m or longer for 30 days; pro 50 on 5m or longer for 90 days. Tell the user what you armed."),
+		mcp.WithDescription("Arm a script alert: one of a saved script's alertcondition(…) (by its title) on a pair and timeframe. The platform checks it after each closed bar and sends its message to the user's Telegram while it is true; it never fires on a forming bar. It follows the script's newest saved version. Plans: plus 5 active alerts on 15m or longer for 30 days; pro 50 on 5m or longer for 90 days. Tell the user what you armed."),
 		mcp.WithString("script", mcp.Required(), mcp.Description("The script: its slug, or syndicate:slug")),
 		mcp.WithString("condition", mcp.Required(), mcp.Description("The title of one of its alertcondition(…) calls (script_open lists them)")),
 		mcp.WithString("exchange", mcp.Required(), mcp.Description("binance, binance_futures, bybit or bybit_futures")),

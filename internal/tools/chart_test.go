@@ -120,7 +120,7 @@ func TestChartView(t *testing.T) {
 	require.False(t, isErr, out)
 	assert.Contains(t, out, "as the user left it 4 min ago (their Chart page did not answer: in the background or closed)")
 	assert.Contains(t, out, "prices after 2026-11-12 12:30 are not in it (get_candles has them)")
-	assert.Contains(t, out, "drawing on it, moving it and saving snapshots are part of Pro")
+	assert.Contains(t, out, "drawing on it, moving it and saving snapshots are part of Plus and Pro")
 	assert.NotContains(t, out, "logs to lab")
 
 	// In a replay nothing is said of the price now, and what the page hides is not listed.
