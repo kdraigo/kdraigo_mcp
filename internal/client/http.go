@@ -130,29 +130,9 @@ func (h *HTTP) Do(ctx context.Context, signed bool, style HeaderStyle, method st
 	}
 
 	if signed {
-		signer, err := h.SignerFor(ctx)
-		if err != nil {
+		if err := h.sign(ctx, req, style, method, path, query, bodyBytes); err != nil {
 			return nil, 0, err
 		}
-		ts := strconv.FormatInt(time.Now().Unix(), 10)
-		nonce, err := auth.NewNonce()
-		if err != nil {
-			return nil, 0, fmt.Errorf("nonce: %w", err)
-		}
-		// Signing version 2: the upstream path (nginx strips the service
-		// prefix before forwarding), the query and a one-time nonce.
-		sig := signer.SignV2(method, path, query, ts, nonce, bodyBytes)
-		switch style {
-		case HeaderStyleBacktester:
-			req.Header.Set("X-API-KEY", signer.KeyID())
-			req.Header.Set("X-SIGNATURE", sig)
-			req.Header.Set("X-TIMESTAMP", ts)
-		default:
-			req.Header.Set("X-Key-ID", signer.KeyID())
-			req.Header.Set("X-Signature", sig)
-			req.Header.Set("X-Timestamp", ts)
-		}
-		req.Header.Set("X-Nonce", nonce)
 	}
 
 	resp, err := h.hc.Do(req)
@@ -167,6 +147,69 @@ func (h *HTTP) Do(ctx context.Context, signed bool, style HeaderStyle, method st
 	}
 	return respBody, resp.StatusCode, nil
 }
+
+// sign adds the auth headers: signing version 2, over the upstream path (nginx
+// strips the service prefix before forwarding), the query and a one-time nonce.
+func (h *HTTP) sign(ctx context.Context, req *http.Request, style HeaderStyle, method, path string, query url.Values, body []byte) error {
+	signer, err := h.SignerFor(ctx)
+	if err != nil {
+		return err
+	}
+	ts := strconv.FormatInt(time.Now().Unix(), 10)
+	nonce, err := auth.NewNonce()
+	if err != nil {
+		return fmt.Errorf("nonce: %w", err)
+	}
+	sig := signer.SignV2(method, path, query, ts, nonce, body)
+	switch style {
+	case HeaderStyleBacktester:
+		req.Header.Set("X-API-KEY", signer.KeyID())
+		req.Header.Set("X-SIGNATURE", sig)
+		req.Header.Set("X-TIMESTAMP", ts)
+	default:
+		req.Header.Set("X-Key-ID", signer.KeyID())
+		req.Header.Set("X-Signature", sig)
+		req.Header.Set("X-Timestamp", ts)
+	}
+	req.Header.Set("X-Nonce", nonce)
+	return nil
+}
+
+// Stream opens a signed GET whose answer is read as it comes (server-sent
+// events). A 2xx answer is returned open, for the caller to read and close;
+// any other is read, closed and returned as an error with its body.
+func (h *HTTP) Stream(ctx context.Context, svc ServicePrefix, path string, query url.Values) (*http.Response, error) {
+	full := h.baseFor(svc) + string(svc) + path
+	if len(query) > 0 {
+		full += "?" + query.Encode()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, full, nil)
+	if err != nil {
+		return nil, fmt.Errorf("new request: %w", err)
+	}
+	req.Header.Set("Accept", "text/event-stream")
+	if err := h.sign(ctx, req, HeaderStyleStandard, http.MethodGet, path, query, nil); err != nil {
+		return nil, err
+	}
+	resp, err := h.hc.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("http: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, &StatusError{Status: resp.StatusCode, Body: strings.TrimSpace(string(body))}
+	}
+	return resp, nil
+}
+
+// StatusError is a refused stream: its HTTP status and what the server said.
+type StatusError struct {
+	Status int
+	Body   string
+}
+
+func (e *StatusError) Error() string { return fmt.Sprintf("HTTP %d: %s", e.Status, e.Body) }
 
 // GetJSON convenience wrapper for signed GET with query params, decoding into `out`.
 func (h *HTTP) GetJSON(ctx context.Context, signed bool, style HeaderStyle, svc ServicePrefix, path string, query url.Values, out any) error {

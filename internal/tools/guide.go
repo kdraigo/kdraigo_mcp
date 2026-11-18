@@ -134,12 +134,16 @@ Always
 
 Answer with the two or three numbers that decide the question, then the warning that qualifies them, then the next step.`
 
+// localOrders is rule 11's second half on the local server, where orders
+// from the user's AI exist (the executor on this computer).
+const localOrders = " Here an order exists only through order_propose, from a position drawing, when the user asks for it; the user confirms the exact order on kdraigo.com before this computer places it. Never ask for exchange keys in the chat."
+
 // Instructions are what the server tells a client at connection: who it is
 // and the core rules, short enough that no client cuts them.
 func Instructions(hosted bool) string {
-	preface := localPreface
 	if hosted {
-		preface = hostedPreface
+		return hostedPreface + "\n" + coreInstructions
 	}
-	return preface + "\n" + coreInstructions
+	core := strings.Replace(coreInstructions, "a trade plan is a drawing, never an order.", "a trade plan is a drawing."+localOrders, 1)
+	return localPreface + "\n" + core
 }

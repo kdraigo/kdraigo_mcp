@@ -66,6 +66,7 @@ func Register(s *server.MCPServer, d Deps) {
 	RegisterScripts(s, d)
 	RegisterAlerts(s, d)
 	RegisterChart(s, d)
+	RegisterOrders(s, d)
 	if os.Getenv(ReplayEnv) == "1" {
 		RegisterBacktest(s, d)
 	}

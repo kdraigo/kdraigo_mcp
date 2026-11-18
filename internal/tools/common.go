@@ -20,6 +20,9 @@ type Deps struct {
 	WaitCap time.Duration
 	// Version is this server's release, for get_started; empty is unknown.
 	Version string
+	// Orders is this computer's executor for orders from the user's AI
+	// (local server only; nil in the hosted one and in tests).
+	Orders *AIOrders
 }
 
 func toolErr(err error) *mcp.CallToolResult {

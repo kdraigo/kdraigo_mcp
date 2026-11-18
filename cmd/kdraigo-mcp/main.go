@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"runtime/debug"
@@ -73,6 +74,12 @@ func main() {
 	}
 	httpClient := client.NewHTTP(cfg.Endpoint, cfg.BacktesterEndpoint, signer)
 	deps := tools.Deps{HTTP: httpClient, Version: resolveVersion()}
+	// Orders from the user's AI: the executor runs while this process does,
+	// when ~/.kdraigo/orders.yaml is complete. Its log goes to stderr: stdout
+	// is the MCP protocol's.
+	deps.Orders = tools.StartAIOrders(context.Background(), httpClient, func(format string, a ...any) {
+		fmt.Fprintf(os.Stderr, format+"\n", a...)
+	})
 
 	s := server.NewMCPServer("kdraigo", resolveVersion(), server.WithInstructions(tools.Instructions(false)))
 	tools.Register(s, deps)

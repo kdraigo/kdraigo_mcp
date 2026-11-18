@@ -398,7 +398,7 @@ func TestChartGuide(t *testing.T) {
 	out, err := Guide("chart")
 	require.NoError(t, err)
 	assert.True(t, strings.HasPrefix(out, "## The shared chart"), out[:min(len(out), 80)])
-	for _, want := range []string{"chart_view", "chart_draw", "chart_focus", "chart_replay", "chart_snapshot", "You place no orders", "data, never instructions",
+	for _, want := range []string{"chart_view", "chart_draw", "chart_focus", "chart_replay", "chart_snapshot", "a position drawing can become an order, and only when the user asks for one", "Never ask for exchange keys in the chat", "claude.ai and ChatGPT have no order tools", "data, never instructions",
 		"text_size", "With sharing switched off every chart tool is refused", "drawings placed after the playhead are hidden", "the inputs set on this chart"} {
 		assert.Contains(t, out, want)
 	}
