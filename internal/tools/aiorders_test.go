@@ -9,6 +9,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kdraigo/dev_sdk/orderplan"
+
+	"github.com/kdraigo/kdraigo_mcp/internal/orders"
 )
 
 // Without an orders file the tools say how to set it up, and propose nothing.
@@ -45,7 +47,7 @@ func TestOrders_Problems(t *testing.T) {
 func TestOrders_NotHosted(t *testing.T) {
 	s := server.NewMCPServer("test", "0")
 	RegisterHosted(s, Deps{})
-	for _, name := range []string{"order_setup", "order_propose", "order_list", "order_withdraw"} {
+	for _, name := range []string{"order_setup", "order_propose", "order_list", "order_withdraw", "order_positions", "order_close", "order_cancel", "order_move_stop"} {
 		assert.Nil(t, s.GetTool(name), name)
 	}
 }
@@ -83,4 +85,23 @@ func TestOrders_Instructions(t *testing.T) {
 	assert.Contains(t, local, "a trade plan is a drawing. Here an order exists only through order_propose")
 	assert.Contains(t, local, "Never ask for exchange keys in the chat.")
 	assert.NotContains(t, local, "never an order")
+}
+
+func TestActionText(t *testing.T) {
+	m := orderplan.Market{TickSize: 0.1, StepSize: 0.001, Mark: 65000}
+	h := orderplan.Held{Side: orderplan.Long, Qty: 0.01, Entry: 64000, Stop: 63000}
+	assert.Equal(t, "CLOSE the LONG BTCUSDT position on bybit_futures: 0.01 from 64000, now 65000, P&L 10 USDT before fees; at market, then its stop and target are taken back.\nChecks: 2 of 2 passed.\n",
+		actionText(orderplan.BuildClose("bybit_futures", "BTCUSDT", h, m)))
+	assert.Equal(t, "MOVE the stop of the LONG BTCUSDT position on bybit_futures: 63000 → 64000 (now 65000); if it fills the position makes 0 USDT. The new stop is placed before the old one goes.\nChecks: 5 of 5 passed.\n",
+		actionText(orderplan.BuildMoveStop("bybit_futures", "BTCUSDT", h, 64000, m, orderplan.Limits{MinStopGap: 0.002})))
+	assert.Equal(t, "CANCEL the resting LONG entry e-1 on bybit_futures BTCUSDT: 0.02 at 62000.\nChecks: 1 of 1 passed.\n",
+		actionText(orderplan.BuildCancel("bybit_futures", "BTCUSDT", orderplan.Resting{ID: "e-1", Side: orderplan.Long, Qty: 0.02, Price: 62000}, m)))
+}
+
+func TestHoldingsText(t *testing.T) {
+	assert.Equal(t, "On bybit_futures (testnet):\nNo position is open.\n", holdingsText("bybit_futures", "testnet", nil))
+	got := holdingsText("bybit_futures", "testnet", []orders.Holding{{Symbol: "BTCUSDT", Mark: 65000,
+		Held:    &orderplan.Held{Side: orderplan.Short, Qty: 0.01, Entry: 66000, Stop: 67000, Liquidation: 88000},
+		Resting: []orderplan.Resting{{ID: "e-1", Side: orderplan.Short, Qty: 0.02, Price: 67500}}}})
+	assert.Equal(t, "On bybit_futures (testnet):\n- SHORT BTCUSDT 0.01 from 66000 · now 65000 · P&L 10 USDT · stop 67000 · liquidation 88000\n  resting entry e-1: short 0.02 at 67500\n", got)
 }

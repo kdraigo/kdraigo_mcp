@@ -4,7 +4,7 @@ go 1.25.9
 
 require (
 	github.com/google/uuid v1.6.0
-	github.com/kdraigo/dev_sdk v1.12.0-rc.2
+	github.com/kdraigo/dev_sdk v1.12.0-rc.3
 	github.com/kdraigo/workspaces_knowledge v0.1.0
 	github.com/mark3labs/mcp-go v0.54.1
 	github.com/stretchr/testify v1.11.1
@@ -21,6 +21,7 @@ require (
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/hirokisan/bybit/v2 v2.39.0 // indirect
 	github.com/jpillora/backoff v1.0.0 // indirect
+	github.com/markcheno/go-talib v0.0.0-20250114000313-ec55a20c902f // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect

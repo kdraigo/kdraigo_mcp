@@ -128,7 +128,7 @@ func TestAnnotationsSayWhatEachToolDoes(t *testing.T) {
 		"board_create": true, "widget_add": true, "widget_update": true, "board_set_layout": true, "script_save": true, "script_fork": true,
 		"alert_create": true, "alert_renew": true,
 		"chart_draw": true, "chart_focus": true, "chart_replay": true, "chart_snapshot": true,
-		"order_propose": true}
+		"order_propose": true, "order_close": true, "order_cancel": true, "order_move_stop": true}
 	for name, st := range s.ListTools() {
 		a := st.Tool.Annotations
 		assert.Equal(t, destructive[name], *a.DestructiveHint, "%s destructive", name)

@@ -179,7 +179,7 @@ func (e *Executor) Propose(ctx context.Context, in ProposeInput) (*Proposal, *or
 		return nil, &t, &Refused{Ticket: t}
 	}
 	p, err := e.server.Propose(ctx, ProposalInput{
-		Venue: venue, Pair: pair, DrawingID: d.ID, DrawingVersion: d.Version, Ticket: t, Executor: e.id, AutoAllowed: e.cfg.AutoAllowed,
+		Venue: venue, Pair: pair, DrawingID: d.ID, DrawingVersion: d.Version, Ticket: &t, Kind: KindOpen, Executor: e.id, AutoAllowed: e.cfg.AutoAllowed,
 	})
 	if err != nil {
 		return nil, &t, err
@@ -235,11 +235,12 @@ func (e *Executor) Run(ctx context.Context) {
 
 // resultDoc is what the executor reports for a proposal.
 type resultDoc struct {
-	Result      *orderexec.Result `json:"result,omitempty"`
-	Error       string            `json:"error,omitempty"`
-	Unprotected bool              `json:"unprotected,omitempty"`
-	Checks      []orderplan.Check `json:"checks,omitempty"`
-	Recovered   bool              `json:"recovered,omitempty"`
+	Result      *orderexec.Result       `json:"result,omitempty"`
+	Action      *orderexec.ActionResult `json:"action,omitempty"`
+	Error       string                  `json:"error,omitempty"`
+	Unprotected bool                    `json:"unprotected,omitempty"`
+	Checks      []orderplan.Check       `json:"checks,omitempty"`
+	Recovered   bool                    `json:"recovered,omitempty"`
 }
 
 // Handle places one confirmed proposal, once. It is safe to call twice for
@@ -276,13 +277,19 @@ func (e *Executor) Handle(ctx context.Context, id string) {
 	if p.Status != StatusConfirmed || p.Executor != e.id {
 		return
 	}
-	status, doc := e.placeConfirmed(ctx, p)
+	var status string
+	var doc resultDoc
+	if p.IsAction() {
+		status, doc = e.actConfirmed(ctx, p)
+	} else {
+		status, doc = e.placeConfirmed(ctx, p)
+	}
 	e.report(ctx, id, status, doc)
 }
 
 func (e *Executor) placeConfirmed(ctx context.Context, p *Proposal) (string, resultDoc) {
-	t := p.Ticket
-	if t.Hash == "" || t.Hash != p.Hash || orderplan.Hash(t) != t.Hash {
+	t, err := p.OpenTicket()
+	if err != nil || t.Hash == "" || t.Hash != p.Hash || orderplan.Hash(t) != t.Hash {
 		return StatusFailed, resultDoc{Error: "not placed: the ticket does not match the one confirmed"}
 	}
 	v, err := e.venues(ctx, t.Symbol)
@@ -361,21 +368,26 @@ func (e *Executor) recoverStarted(ctx context.Context, id string) {
 		_ = e.journal.Reported(id, p.Status)
 		return
 	}
+	if p.IsAction() {
+		status, doc := e.recoverAction(ctx, p)
+		e.report(ctx, id, status, doc)
+		return
+	}
 	doc := resultDoc{Recovered: true}
 	status := StatusFailed
-	v, err := e.venues(ctx, p.Ticket.Symbol)
+	v, err := e.venues(ctx, p.Pair)
 	if err == nil {
 		var a orderplan.Account
-		_, a, err = orderexec.Snapshot(ctx, v, p.Ticket.Venue, p.Ticket.Symbol, e.now())
+		_, a, err = orderexec.Snapshot(ctx, v, p.Venue, p.Pair, e.now())
 		if err == nil && a.PositionOnSymbol {
 			status = StatusPlaced
-			doc.Error = fmt.Sprintf("this computer stopped while placing it; a position is open on %s: check that its stop is on the exchange", p.Ticket.Symbol)
+			doc.Error = fmt.Sprintf("this computer stopped while placing it; a position is open on %s: check that its stop is on the exchange", p.Pair)
 		} else if err == nil {
-			doc.Error = fmt.Sprintf("this computer stopped while placing it; no position is open on %s (a resting limit entry may remain: check the exchange)", p.Ticket.Symbol)
+			doc.Error = fmt.Sprintf("this computer stopped while placing it; no position is open on %s (a resting limit entry may remain: check the exchange)", p.Pair)
 		}
 	}
 	if err != nil {
-		doc.Error = fmt.Sprintf("this computer stopped while placing it, and %s could not be read (%v): check %s on the exchange", e.cfg.Venue, err, p.Ticket.Symbol)
+		doc.Error = fmt.Sprintf("this computer stopped while placing it, and %s could not be read (%v): check %s on the exchange", e.cfg.Venue, err, p.Pair)
 	}
 	e.report(ctx, id, status, doc)
 }

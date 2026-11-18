@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -81,6 +82,136 @@ func RegisterOrders(s *server.MCPServer, d Deps) {
 	addOrderPropose(s, a)
 	addOrderList(s, a)
 	addOrderWithdraw(s, a)
+	addOrderPositions(s, a)
+	addOrderAction(s, a, orders.KindClose, "order_close",
+		"Propose closing the position on a contract, all of it, at market (reduce-only: it cannot flip it); once flat its stop and target are taken back. "+
+			"The user confirms it on kdraigo.com/chart or in Telegram, like an order. Only when the user asks to close.")
+	addOrderAction(s, a, orders.KindCancel, "order_cancel",
+		"Propose cancelling a resting limit entry that has not filled (on Bybit its attached stop and target go with it). "+
+			"The user confirms it on kdraigo.com/chart or in Telegram. order_positions lists the resting entries and their ids.")
+	addOrderAction(s, a, orders.KindMoveStop, "order_move_stop",
+		"Propose moving an open position's stop to a new price: below the price now for a long (above for a short), at least the user's minimum gap from it, "+
+			"before the liquidation. The new stop is placed before the old one goes, so the position is never without one. The user confirms it on kdraigo.com/chart or in Telegram.")
+}
+
+func addOrderPositions(s *server.MCPServer, a *AIOrders) {
+	tool := mcp.NewTool("order_positions",
+		mcp.WithDescription("What is open on the exchange account this computer places orders on: each position (side, size, entry, the price now, P&L, its stop, the liquidation) "+
+			"and the resting entry orders with their ids. Read it before order_close, order_cancel or order_move_stop. Reads only."),
+		mcp.WithString("pair", mcp.Description("One contract, e.g. BTCUSDT; empty reads every open position")),
+		readOnly(), local(),
+	)
+	add(s, tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		e, why := a.ready()
+		if e == nil {
+			return mcp.NewToolResultError(strings.Replace(why, "Nothing was proposed.", "Nothing was read.", 1)), nil
+		}
+		list, err := e.Holdings(ctx, req.GetString("pair", ""))
+		if err != nil {
+			return toolErr(err), nil
+		}
+		return toolText(holdingsText(e.Config().Venue, e.Config().Network, list)), nil
+	})
+}
+
+func holdingsText(venue, network string, list []orders.Holding) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "On %s (%s):\n", venue, network)
+	if len(list) == 0 {
+		b.WriteString("No position is open.\n")
+		return b.String()
+	}
+	for _, h := range list {
+		if p := h.Held; p != nil {
+			pnl := (h.Mark - p.Entry) * p.Qty
+			if p.Side == orderplan.Short {
+				pnl = -pnl
+			}
+			stop := "no stop found"
+			if p.Stop > 0 {
+				stop = "stop " + num(p.Stop)
+			}
+			liq := ""
+			if p.Liquidation > 0 {
+				liq = " · liquidation " + num(p.Liquidation)
+			}
+			fmt.Fprintf(&b, "- %s %s %s from %s · now %s · P&L %s USDT · %s%s\n",
+				strings.ToUpper(string(p.Side)), h.Symbol, num(p.Qty), num(p.Entry), num(h.Mark), num(math.Round(pnl*100)/100), stop, liq)
+		} else {
+			fmt.Fprintf(&b, "- %s: no position\n", h.Symbol)
+		}
+		for _, r := range h.Resting {
+			fmt.Fprintf(&b, "  resting entry %s: %s %s at %s\n", r.ID, r.Side, num(r.Qty), num(r.Price))
+		}
+	}
+	return b.String()
+}
+
+func addOrderAction(s *server.MCPServer, a *AIOrders, kind, name, desc string) {
+	opts := []mcp.ToolOption{
+		mcp.WithDescription(desc),
+		mcp.WithString("pair", mcp.Description("The contract, e.g. BTCUSDT; empty is the shared chart's")),
+	}
+	switch kind {
+	case orders.KindCancel:
+		opts = append(opts, mcp.WithString("order_id", mcp.Description("The resting entry's id (order_positions); empty when only one rests")))
+	case orders.KindMoveStop:
+		opts = append(opts, mcp.WithNumber("stop", mcp.Required(), mcp.Description("The new stop's price")))
+	}
+	opts = append(opts, additive(false), local())
+	add(s, mcp.NewTool(name, opts...), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		e, why := a.ready()
+		if e == nil {
+			return mcp.NewToolResultError(why), nil
+		}
+		p, act, err := e.ProposeAction(ctx, orders.ActionInput{
+			Kind: kind, Pair: req.GetString("pair", ""), OrderID: req.GetString("order_id", ""), Stop: req.GetFloat("stop", 0),
+		})
+		if err != nil {
+			var r *orders.ActionRefused
+			if errors.As(err, &r) {
+				return mcp.NewToolResultError(actionText(r.Action) + "\n" + err.Error()), nil
+			}
+			return toolErr(err), nil
+		}
+		var b strings.Builder
+		b.WriteString(actionText(*act))
+		if p.Status == orders.StatusConfirmed {
+			fmt.Fprintf(&b, "\nProposal %s was confirmed without asking (the user's switch on kdraigo.com and auto_allowed here are both on): this computer does it now. order_list shows the result.", p.ID)
+		} else {
+			fmt.Fprintf(&b, "\nProposal %s waits for the user's yes on kdraigo.com/chart or in Telegram until %s UTC. It is carried out from this computer while this Claude Code session stays open; order_list shows what happened.",
+				p.ID, p.ExpiresAt.UTC().Format("15:04"))
+		}
+		return toolText(b.String()), nil
+	})
+}
+
+// actionText is the exact action, as the user will see it to confirm.
+func actionText(a orderplan.Action) string {
+	var b strings.Builder
+	side := strings.ToUpper(string(a.Side))
+	switch a.Kind {
+	case orderplan.ActClose:
+		fmt.Fprintf(&b, "CLOSE the %s %s position on %s: %s from %s, now %s, P&L %s USDT before fees; at market, then its stop and target are taken back.\n",
+			side, a.Symbol, a.Venue, num(a.Qty), num(a.Entry), num(a.Mark), num(a.PnL))
+	case orderplan.ActCancel:
+		fmt.Fprintf(&b, "CANCEL the resting %s entry %s on %s %s: %s at %s.\n", side, a.OrderID, a.Venue, a.Symbol, num(a.Qty), num(a.Price))
+	case orderplan.ActMoveStop:
+		from := "unknown"
+		if a.OldStop > 0 {
+			from = num(a.OldStop)
+		}
+		fmt.Fprintf(&b, "MOVE the stop of the %s %s position on %s: %s → %s (now %s); if it fills the position makes %s USDT. The new stop is placed before the old one goes.\n",
+			side, a.Symbol, a.Venue, from, num(a.Stop), num(a.Mark), num(a.PnL))
+	}
+	passed := 0
+	for _, c := range a.Checks {
+		if c.OK {
+			passed++
+		}
+	}
+	fmt.Fprintf(&b, "Checks: %d of %d passed.\n", passed, len(a.Checks))
+	return b.String()
 }
 
 // ready is the executor, or the text saying why there is none.
@@ -240,7 +371,11 @@ func addOrderList(s *server.MCPServer, a *AIOrders) {
 		}
 		var b strings.Builder
 		for _, p := range list {
-			fmt.Fprintf(&b, "%s · %s · %s %s %s (%s) · %s", p.ID, p.CreatedAt.UTC().Format("2006-01-02 15:04"), strings.ToUpper(p.Side), p.Pair, p.Venue, p.EntryType, p.Status)
+			what := p.EntryType
+			if p.IsAction() {
+				what = p.Kind
+			}
+			fmt.Fprintf(&b, "%s · %s · %s %s %s (%s) · %s", p.ID, p.CreatedAt.UTC().Format("2006-01-02 15:04"), strings.ToUpper(p.Side), p.Pair, p.Venue, what, p.Status)
 			if p.DecidedVia != nil {
 				fmt.Fprintf(&b, " via %s", *p.DecidedVia)
 			}
@@ -259,9 +394,10 @@ func resultLine(raw json.RawMessage) string {
 		return ""
 	}
 	var r struct {
-		Result      *orderexec.Result `json:"result"`
-		Error       string            `json:"error"`
-		Unprotected bool              `json:"unprotected"`
+		Result      *orderexec.Result       `json:"result"`
+		Action      *orderexec.ActionResult `json:"action"`
+		Error       string                  `json:"error"`
+		Unprotected bool                    `json:"unprotected"`
 	}
 	if json.Unmarshal(raw, &r) != nil {
 		return ""
@@ -280,6 +416,15 @@ func resultLine(raw json.RawMessage) string {
 		if r.Result.Flattened {
 			parts = append(parts, "closed at market")
 		}
+	}
+	if a := r.Action; a != nil {
+		if a.Filled > 0 {
+			parts = append(parts, fmt.Sprintf("closed %s at %s", num(a.Filled), num(a.AvgPrice)))
+		}
+		if len(a.Cancelled) > 0 {
+			parts = append(parts, "taken back: "+strings.Join(a.Cancelled, ", "))
+		}
+		parts = append(parts, a.Notes...)
 	}
 	if r.Error != "" {
 		parts = append(parts, r.Error)

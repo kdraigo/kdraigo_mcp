@@ -36,7 +36,14 @@ type exchange struct {
 func (x *exchange) PlaceOrder(_ context.Context, r *types.OrderRequest) (*types.Order, error) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
+	if r.Type == types.OrderTypeStopLoss {
+		x.placed = append(x.placed, fmt.Sprintf("%s STOP %g @ %g", r.Side, r.Quantity, r.StopPrice))
+		return &types.Order{ID: "sl-new", Type: types.OrderTypeStopLoss, StopPrice: r.StopPrice, ReduceOnly: true}, nil
+	}
 	x.placed = append(x.placed, fmt.Sprintf("%s %s %g", r.Side, r.Type, r.Quantity))
+	if r.ReduceOnly {
+		x.positions = nil // closed
+	}
 	return &types.Order{ID: fmt.Sprintf("o-%d", len(x.placed)), Status: types.OrderStatusFilled, Quantity: r.Quantity, FilledQty: r.Quantity, AveragePrice: x.mark}, nil
 }
 func (x *exchange) CancelOrder(_ context.Context, _, _, id string) error {
@@ -102,7 +109,14 @@ func (s *server) Propose(_ context.Context, in ProposalInput) (*Proposal, error)
 	defer s.mu.Unlock()
 	s.n++
 	s.proposed = append(s.proposed, in)
-	p := &Proposal{ID: fmt.Sprintf("p-%d", s.n), Venue: in.Venue, Pair: in.Pair, Ticket: in.Ticket, Hash: in.Ticket.Hash, Status: StatusPending, Executor: in.Executor}
+	p := &Proposal{ID: fmt.Sprintf("p-%d", s.n), Kind: in.Kind, Venue: in.Venue, Pair: in.Pair, Status: StatusPending, Executor: in.Executor}
+	if in.Action != nil {
+		p.Ticket, _ = json.Marshal(in.Action)
+		p.Hash = in.Action.Hash
+	} else {
+		p.Ticket, _ = json.Marshal(in.Ticket)
+		p.Hash = in.Ticket.Hash
+	}
 	s.proposals[p.ID] = p
 	return p, nil
 }
@@ -345,7 +359,10 @@ func TestHandle_HashMismatch(t *testing.T) {
 	p, _, err := e.Propose(ctx, ProposeInput{DrawingID: "ai_1", EntryType: orderplan.AtMarket})
 	require.NoError(t, err)
 	srv.confirm(p.ID)
-	srv.proposals[p.ID].Ticket.Qty = 1 // changed after the yes
+	var changed orderplan.Ticket
+	require.NoError(t, json.Unmarshal(srv.proposals[p.ID].Ticket, &changed))
+	changed.Qty = 1 // changed after the yes
+	srv.proposals[p.ID].Ticket, _ = json.Marshal(changed)
 	e.Handle(ctx, p.ID)
 	assert.Empty(t, x.placed)
 	assert.Contains(t, srv.results[p.ID].Error, "does not match the one confirmed")

@@ -136,7 +136,7 @@ Answer with the two or three numbers that decide the question, then the warning 
 
 // localOrders is rule 11's second half on the local server, where orders
 // from the user's AI exist (the executor on this computer).
-const localOrders = " Here an order exists only through order_propose, from a position drawing, when the user asks for it; the user confirms the exact order on kdraigo.com before this computer places it. Never ask for exchange keys in the chat."
+const localOrders = " Here an order exists only through order_propose, from a position drawing, when the user asks for it (and order_close, order_cancel, order_move_stop on what is open); the user confirms each on kdraigo.com or in Telegram before this computer acts. Never ask for exchange keys in the chat."
 
 // Instructions are what the server tells a client at connection: who it is
 // and the core rules, short enough that no client cuts them.

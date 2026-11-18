@@ -18,25 +18,63 @@ import (
 
 // Proposal is research_service's order proposal.
 type Proposal struct {
-	ID             string           `json:"id"`
-	Venue          string           `json:"venue"`
-	Pair           string           `json:"pair"`
-	DrawingID      string           `json:"drawing_id"`
-	DrawingVersion int64            `json:"drawing_version"`
-	Side           string           `json:"side"`
-	EntryType      string           `json:"entry_type"`
-	Ticket         orderplan.Ticket `json:"ticket"`
-	Hash           string           `json:"hash"`
-	Status         string           `json:"status"`
-	Mode           string           `json:"mode"`
-	Executor       string           `json:"executor"`
-	CreatedAt      time.Time        `json:"created_at"`
-	ExpiresAt      time.Time        `json:"expires_at"`
-	DecidedAt      *time.Time       `json:"decided_at,omitempty"`
-	DecidedVia     *string          `json:"decided_via,omitempty"`
-	Result         json.RawMessage  `json:"result,omitempty"`
-	FinishedAt     *time.Time       `json:"finished_at,omitempty"`
+	ID string `json:"id"`
+	// Kind is open (Ticket is an orderplan.Ticket) or an action on what is
+	// open: close, cancel, move_stop (Ticket is an orderplan.Action).
+	Kind           string          `json:"kind"`
+	Venue          string          `json:"venue"`
+	Pair           string          `json:"pair"`
+	DrawingID      string          `json:"drawing_id"`
+	DrawingVersion int64           `json:"drawing_version"`
+	Side           string          `json:"side"`
+	EntryType      string          `json:"entry_type"`
+	Ticket         json.RawMessage `json:"ticket"`
+	Hash           string          `json:"hash"`
+	Status         string          `json:"status"`
+	Mode           string          `json:"mode"`
+	Executor       string          `json:"executor"`
+	CreatedAt      time.Time       `json:"created_at"`
+	ExpiresAt      time.Time       `json:"expires_at"`
+	DecidedAt      *time.Time      `json:"decided_at,omitempty"`
+	DecidedVia     *string         `json:"decided_via,omitempty"`
+	Result         json.RawMessage `json:"result,omitempty"`
+	FinishedAt     *time.Time      `json:"finished_at,omitempty"`
 }
+
+// IsAction: a close, cancel or move_stop.
+func (p *Proposal) IsAction() bool {
+	switch p.Kind {
+	case KindClose, KindCancel, KindMoveStop:
+		return true
+	}
+	return false
+}
+
+// OpenTicket is an open's ticket.
+func (p *Proposal) OpenTicket() (orderplan.Ticket, error) {
+	var t orderplan.Ticket
+	if p.IsAction() {
+		return t, fmt.Errorf("proposal %s is a %s, not an open", p.ID, p.Kind)
+	}
+	return t, json.Unmarshal(p.Ticket, &t)
+}
+
+// Action is an action's.
+func (p *Proposal) Action() (orderplan.Action, error) {
+	var a orderplan.Action
+	if !p.IsAction() {
+		return a, fmt.Errorf("proposal %s is an open, not an action", p.ID)
+	}
+	return a, json.Unmarshal(p.Ticket, &a)
+}
+
+// Proposal kinds (research_service db.Kind*).
+const (
+	KindOpen     = "open"
+	KindClose    = "close"
+	KindCancel   = "cancel"
+	KindMoveStop = "move_stop"
+)
 
 // Proposal states (research_service db.Proposal*).
 const (
@@ -46,15 +84,18 @@ const (
 	StatusFailed    = "failed"
 )
 
-// ProposalInput is POST /orders/proposals.
+// ProposalInput is POST /orders/proposals: an open from a drawing (Ticket),
+// or an action (Kind and Action).
 type ProposalInput struct {
-	Venue          string           `json:"venue"`
-	Pair           string           `json:"pair"`
-	DrawingID      string           `json:"drawing_id"`
-	DrawingVersion int64            `json:"drawing_version"`
-	Ticket         orderplan.Ticket `json:"ticket"`
-	Executor       string           `json:"executor"`
-	AutoAllowed    bool             `json:"auto_allowed"`
+	Venue          string            `json:"venue"`
+	Pair           string            `json:"pair"`
+	DrawingID      string            `json:"drawing_id,omitempty"`
+	DrawingVersion int64             `json:"drawing_version,omitempty"`
+	Ticket         *orderplan.Ticket `json:"ticket,omitempty"`
+	Kind           string            `json:"kind,omitempty"`
+	Action         *orderplan.Action `json:"action,omitempty"`
+	Executor       string            `json:"executor"`
+	AutoAllowed    bool              `json:"auto_allowed"`
 }
 
 // Drawing is a stored chart drawing with its version.
