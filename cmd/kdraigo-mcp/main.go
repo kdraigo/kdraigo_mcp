@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"runtime/debug"
+	"time"
 
 	"github.com/mark3labs/mcp-go/server"
 
@@ -77,14 +78,22 @@ func main() {
 	// Orders from the user's AI: the executor runs while this process does,
 	// when ~/.kdraigo/orders.yaml is complete. Its log goes to stderr: stdout
 	// is the MCP protocol's.
-	deps.Orders = tools.StartAIOrders(context.Background(), httpClient, func(format string, a ...any) {
-		fmt.Fprintf(os.Stderr, format+"\n", a...)
-	})
+	ordersCtx, stopOrders := context.WithCancel(context.Background())
+	deps.Orders = tools.StartAIOrders(ordersCtx, httpClient,
+		tools.Telemetry{URL: cfg.BacktesterEndpoint, KeyID: cfg.Auth.KeyID, PrivateKey: cfg.Auth.PrivateKey},
+		func(format string, a ...any) { fmt.Fprintf(os.Stderr, format+"\n", a...) })
 
 	s := server.NewMCPServer("kdraigo", resolveVersion(), server.WithInstructions(tools.Instructions(false)))
 	tools.Register(s, deps)
 
-	if err := server.ServeStdio(s); err != nil {
+	err = server.ServeStdio(s)
+	// The AI orders' live-console session says it stopped; the report is
+	// sent in the background, so give it a moment before the process ends.
+	stopOrders()
+	if deps.Orders != nil && deps.Orders.Exec != nil {
+		time.Sleep(1500 * time.Millisecond)
+	}
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "stdio:", err)
 		os.Exit(1)
 	}

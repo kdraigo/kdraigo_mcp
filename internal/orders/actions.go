@@ -68,17 +68,30 @@ func (e *Executor) ProposeAction(ctx context.Context, in ActionInput) (*Proposal
 		return nil, nil, fmt.Errorf("%s: %w", e.cfg.Venue, err)
 	}
 
+	// AI orders act only on what they opened (D4).
+	mine := func(what string) error {
+		if e.console != nil && !e.console.Owns(pair) {
+			return fmt.Errorf("this computer did not open the %s %s: AI orders act only on what they opened", pair, what)
+		}
+		return nil
+	}
 	var a orderplan.Action
 	switch in.Kind {
 	case KindClose:
 		if h == nil {
 			return nil, nil, fmt.Errorf("no position is open on %s %s: nothing to close", venue, pair)
 		}
+		if err := mine("position"); err != nil {
+			return nil, nil, err
+		}
 		a = orderplan.BuildClose(venue, pair, *h, m)
 	case KindCancel:
 		r, err := pickResting(resting, in.OrderID, pair)
 		if err != nil {
 			return nil, nil, err
+		}
+		if e.console != nil && !e.console.OwnsOrder(r.ID) {
+			return nil, nil, fmt.Errorf("this computer did not place the order %s on %s: AI orders act only on what they opened", r.ID, pair)
 		}
 		a = orderplan.BuildCancel(venue, pair, r, m)
 	case KindMoveStop:
@@ -87,6 +100,9 @@ func (e *Executor) ProposeAction(ctx context.Context, in ActionInput) (*Proposal
 		}
 		if in.Stop <= 0 {
 			return nil, nil, fmt.Errorf("stop: the new stop's price")
+		}
+		if err := mine("position"); err != nil {
+			return nil, nil, err
 		}
 		a = orderplan.BuildMoveStop(venue, pair, *h, in.Stop, m, e.cfg.Limits.Plan())
 	}
@@ -162,6 +178,9 @@ func (e *Executor) actConfirmed(ctx context.Context, p *Proposal) (string, resul
 		return StatusFailed, resultDoc{Error: "not done: the local journal could not be written (" + err.Error() + ")"}
 	}
 	res, err := orderexec.Act(ctx, v, a, orderexec.Options{Reason: map[string]any{"source": "ai-order", "proposal": p.ID, "action": string(a.Kind)}})
+	if res != nil {
+		e.track(ctx, v, a.Venue, a.Symbol, append([]string{res.OrderID}, res.Cancelled...)...)
+	}
 	if err != nil {
 		return StatusFailed, resultDoc{Action: res, Error: err.Error()}
 	}
@@ -215,6 +234,8 @@ type Holding struct {
 	Mark    float64
 	Held    *orderplan.Held
 	Resting []orderplan.Resting
+	// NotMine: AI orders did not open this (another trader uses the account).
+	NotMine bool
 }
 
 // Holdings reads what is open on the account (or on one pair): positions
@@ -251,7 +272,7 @@ func (e *Executor) Holdings(ctx context.Context, pair string) ([]Holding, error)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", s, err)
 		}
-		hv := Holding{Symbol: s, Held: h, Resting: resting}
+		hv := Holding{Symbol: s, Held: h, Resting: resting, NotMine: e.console != nil && !e.console.Owns(s)}
 		if c, err := v.Contract(ctx, e.cfg.Venue, s); err == nil {
 			hv.Mark = c.Mark
 		}

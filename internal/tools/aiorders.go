@@ -16,6 +16,7 @@ import (
 
 	"github.com/kdraigo/dev_sdk/orderexec"
 	"github.com/kdraigo/dev_sdk/orderplan"
+	"github.com/kdraigo/dev_sdk/telemetry"
 
 	"github.com/kdraigo/kdraigo_mcp/internal/client"
 	"github.com/kdraigo/kdraigo_mcp/internal/orders"
@@ -33,9 +34,16 @@ type AIOrders struct {
 	Problems []string
 }
 
+// Telemetry is where the AI orders' live-console session reports, signed
+// with the user's kdraigo key (config.yaml).
+type Telemetry struct {
+	URL, KeyID, PrivateKey string
+}
+
 // StartAIOrders reads ~/.kdraigo/orders.yaml and, when it is complete,
-// starts the executor's connection to kdraigo for as long as ctx lives.
-func StartAIOrders(ctx context.Context, h *client.HTTP, logf func(string, ...any)) *AIOrders {
+// starts the executor's connection to kdraigo, and its live-console session,
+// for as long as ctx lives.
+func StartAIOrders(ctx context.Context, h *client.HTTP, tel Telemetry, logf func(string, ...any)) *AIOrders {
 	path := orders.DefaultPath()
 	a := &AIOrders{Path: path}
 	cfg, err := orders.Load(path)
@@ -68,6 +76,15 @@ func StartAIOrders(ctx context.Context, h *client.HTTP, logf func(string, ...any
 		return a
 	}
 	a.Exec = orders.New(cfg, orders.HTTPServer{HTTP: h}, orders.LiveVenues(cfg, keys), j, id, logf)
+	console, err := orders.OpenConsole(filepath.Join(dir, "ai-orders-console.json"), func(sessionID string) telemetry.Publisher {
+		return telemetry.NewPublisher(sessionID, tel.URL, tel.KeyID, tel.PrivateKey, cfg.Venue, "", telemetry.WithEnvironment(string(cfg.Environment())))
+	})
+	if err != nil {
+		a.Exec = nil
+		a.Problems = []string{"the AI orders' memory (ai-orders-console.json) could not be read: " + err.Error()}
+		return a
+	}
+	a.Exec.WithConsole(console)
 	go a.Exec.Run(ctx)
 	return a
 }
@@ -122,6 +139,10 @@ func holdingsText(venue, network string, list []orders.Holding) string {
 		return b.String()
 	}
 	for _, h := range list {
+		mark := ""
+		if h.NotMine {
+			mark = " (NOT placed by this computer: another trader uses this account)"
+		}
 		if p := h.Held; p != nil {
 			pnl := (h.Mark - p.Entry) * p.Qty
 			if p.Side == orderplan.Short {
@@ -135,8 +156,8 @@ func holdingsText(venue, network string, list []orders.Holding) string {
 			if p.Liquidation > 0 {
 				liq = " · liquidation " + num(p.Liquidation)
 			}
-			fmt.Fprintf(&b, "- %s %s %s from %s · now %s · P&L %s USDT · %s%s\n",
-				strings.ToUpper(string(p.Side)), h.Symbol, num(p.Qty), num(p.Entry), num(h.Mark), num(math.Round(pnl*100)/100), stop, liq)
+			fmt.Fprintf(&b, "- %s %s %s from %s · now %s · P&L %s USDT · %s%s%s\n",
+				strings.ToUpper(string(p.Side)), h.Symbol, num(p.Qty), num(p.Entry), num(h.Mark), num(math.Round(pnl*100)/100), stop, liq, mark)
 		} else {
 			fmt.Fprintf(&b, "- %s: no position\n", h.Symbol)
 		}
@@ -277,6 +298,7 @@ func (a *AIOrders) setupText() string {
 	fmt.Fprintf(&b, "Limits (the user's): risk %s USDT per trade, positions up to %s USDT, leverage %gx (max %gx), %d open at most, no new position after a %s USDT loss today, a market entry within %s of the price, a limit within %s, a stop at least %s from the entry.\n",
 		num(l.RiskPerTrade), num(l.MaxPositionValue), l.Leverage, l.MaxLeverage, l.MaxOpenPositions, num(l.MaxDailyLoss), pct(l.MaxEntryGap), pct(l.MaxLimitGap), pct(l.MinStopGap))
 	fmt.Fprintf(&b, "Between the user's yes and placing, the price may move %s and the loss at the stop grow %s; past that the order is not placed.\n", pct(c.Tolerance.PriceDrift), pct(c.Tolerance.RiskSlack))
+	b.WriteString("AI orders show in the live console as their own session, \"AI orders\", while this computer runs. They need an exchange account of their own: an order is refused on an account holding positions or orders this computer did not place, and close, cancel and move stop act only on what AI orders opened.\n")
 	if c.AutoAllowed {
 		b.WriteString("auto_allowed is on here: with the user's switch on kdraigo.com on too, orders go without asking.\n")
 	} else {

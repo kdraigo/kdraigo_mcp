@@ -71,6 +71,9 @@ type Executor struct {
 
 	place sync.Mutex // one placement at a time: each re-reads the account
 
+	// console is the AI orders' live-console session and memory (nil: none).
+	console *Console
+
 	mu        sync.Mutex
 	connected bool
 	lastErr   string
@@ -83,6 +86,87 @@ func New(cfg *Config, server Server, venues VenueFactory, journal *Journal, id s
 		logf = func(string, ...any) {}
 	}
 	return &Executor{cfg: cfg, server: server, venues: venues, journal: journal, id: id, now: time.Now, logf: logf, busy: map[string]bool{}}
+}
+
+// WithConsole reports AI orders to the live console and keeps the memory of
+// what they opened.
+func (e *Executor) WithConsole(c *Console) *Executor {
+	e.console = c
+	return e
+}
+
+// shared is what the account holds that AI orders did not place (D4).
+func (e *Executor) shared(ctx context.Context, v orderexec.Venue, venue, symbol string) error {
+	if e.console == nil {
+		return nil
+	}
+	what, err := e.console.foreign(ctx, v, venue, symbol)
+	if err != nil {
+		return err
+	}
+	if len(what) > 0 {
+		return errShared(what)
+	}
+	return nil
+}
+
+// track reports orders by id, read back from the venue, to the console.
+func (e *Executor) track(ctx context.Context, v orderexec.Venue, venue, symbol string, ids ...string) {
+	if e.console == nil {
+		return
+	}
+	var list []*types.Order
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		o, err := v.GetOrder(context.WithoutCancel(ctx), venue, symbol, id)
+		if err != nil || o == nil {
+			o = &types.Order{ID: id, Status: types.OrderStatusNew}
+		}
+		if o.Symbol == "" {
+			o.Symbol = symbol
+		}
+		if o.Exchange == "" {
+			o.Exchange = venue
+		}
+		list = append(list, o)
+	}
+	e.console.Track(list...)
+}
+
+// runConsole declares the session, heartbeats every 5 s (the live console
+// calls a session silent for 15 s disconnected), follows the AI orders'
+// fills every 30 s, and says "stopped" when ctx ends.
+func (e *Executor) runConsole(ctx context.Context) {
+	if e.console == nil {
+		return
+	}
+	start := e.now()
+	meta := map[string]any{"executor": e.id, "venue": e.cfg.Venue, "network": e.cfg.Network, "kind": "ai-orders"}
+	var acct *types.Account
+	if v, err := e.venues(ctx, "BTCUSDT"); err == nil {
+		acct, _ = v.GetAccount(ctx, e.cfg.Venue, orderexec.Settlement)
+	}
+	e.console.Start(meta, string(e.cfg.Environment()), acct)
+	beat := time.NewTicker(5 * time.Second)
+	defer beat.Stop()
+	follow := time.NewTicker(30 * time.Second)
+	defer follow.Stop()
+	e.console.Heartbeat(0)
+	for {
+		select {
+		case <-ctx.Done():
+			e.console.Stopped("kdraigo-mcp on this computer closed: AI orders are not followed until it runs again")
+			return
+		case <-beat.C:
+			e.console.Heartbeat(e.now().Sub(start))
+		case <-follow.C:
+			if err := e.console.Follow(ctx, e.venues, e.cfg.Venue); err != nil {
+				e.logf("orders: following the AI orders: %v", err)
+			}
+		}
+	}
 }
 
 // ID is this computer's executor name, the one proposals carry.
@@ -167,6 +251,9 @@ func (e *Executor) Propose(ctx context.Context, in ProposeInput) (*Proposal, *or
 	if err != nil {
 		return nil, nil, fmt.Errorf("%s: %w", e.cfg.Venue, err)
 	}
+	if err := e.shared(ctx, v, venue, pair); err != nil {
+		return nil, nil, err
+	}
 	m, a, err := orderexec.Snapshot(ctx, v, venue, pair, e.now())
 	if err != nil {
 		return nil, nil, fmt.Errorf("%s: %w", e.cfg.Venue, err)
@@ -194,6 +281,7 @@ func (e *Executor) Propose(ctx context.Context, in ProposeInput) (*Proposal, *or
 // key) waits ten minutes before asking again; anything else reconnects
 // sooner.
 func (e *Executor) Run(ctx context.Context) {
+	go e.runConsole(ctx)
 	wait := time.Second
 	for ctx.Err() == nil {
 		body, err := e.server.Events(ctx, e.id)
@@ -304,6 +392,9 @@ func (e *Executor) placeConfirmed(ctx context.Context, p *Proposal) (string, res
 	if !orderplan.Passed(checks) {
 		return StatusFailed, resultDoc{Error: "not placed: the market or the account changed since it was confirmed", Checks: checks}
 	}
+	if err := e.shared(ctx, v, t.Venue, t.Symbol); err != nil {
+		return StatusFailed, resultDoc{Error: "not placed: " + err.Error()}
+	}
 	if msg := e.clearOld(ctx, v, t, a); msg != "" {
 		return StatusFailed, resultDoc{Error: msg}
 	}
@@ -311,6 +402,9 @@ func (e *Executor) placeConfirmed(ctx context.Context, p *Proposal) (string, res
 		return StatusFailed, resultDoc{Error: "not placed: the local journal could not be written (" + err.Error() + ")"}
 	}
 	res, err := orderexec.Open(ctx, v, t, orderexec.Options{Reason: map[string]any{"source": "ai-order", "proposal": p.ID}})
+	if res != nil {
+		e.track(ctx, v, t.Venue, t.Symbol, res.EntryID, res.StopID, res.TargetID)
+	}
 	if err != nil {
 		return StatusFailed, resultDoc{Result: res, Error: err.Error(), Unprotected: errors.Is(err, orderexec.ErrUnprotected)}
 	}
