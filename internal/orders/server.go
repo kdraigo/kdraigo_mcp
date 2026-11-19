@@ -39,6 +39,10 @@ type Proposal struct {
 	DecidedVia     *string         `json:"decided_via,omitempty"`
 	Result         json.RawMessage `json:"result,omitempty"`
 	FinishedAt     *time.Time      `json:"finished_at,omitempty"`
+	// PaperAccount and PaperName: an order on a paper wallet, which
+	// kdraigo places itself (no executor); nil for the exchange account.
+	PaperAccount *string `json:"paper_account,omitempty"`
+	PaperName    *string `json:"paper_name,omitempty"`
 }
 
 // IsAction: a close, cancel or move_stop.

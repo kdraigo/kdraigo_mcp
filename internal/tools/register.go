@@ -22,7 +22,8 @@ const HostedWaitCap = 60 * time.Second
 // Register adds every tool.
 // RegisterHosted adds what the hosted server (kdraigo-mcp serve) offers: the
 // same tools less those that touch the caller's own disk (scaffold_strategy,
-// vault_pull, vault_push) and the candle replay.
+// vault_pull, vault_push) and the candle replay, and with the order tools for
+// paper wallets only (no exchange account is reachable from it).
 func RegisterHosted(s *server.MCPServer, d Deps) {
 	if d.WaitCap == 0 {
 		d.WaitCap = HostedWaitCap
@@ -44,6 +45,7 @@ func RegisterHosted(s *server.MCPServer, d Deps) {
 	RegisterScripts(s, d)
 	RegisterAlerts(s, d)
 	RegisterChart(s, d)
+	RegisterPaperOrders(s, d)
 }
 
 func Register(s *server.MCPServer, d Deps) {

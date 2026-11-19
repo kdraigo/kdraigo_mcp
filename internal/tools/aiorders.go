@@ -22,9 +22,11 @@ import (
 	"github.com/kdraigo/kdraigo_mcp/internal/orders"
 )
 
-// Orders from the user's AI (wiki roadmap/ai_orders.md): the local server
-// only. The executor in this process holds the exchange keys and places what
-// the user confirms on kdraigo.com; the hosted server has none of these tools.
+// Orders from the user's AI (wiki roadmap/ai_orders.md). On the user's
+// exchange account: the local server only; the executor in this process holds
+// the exchange keys and places what the user confirms on kdraigo.com. On a
+// paper wallet (paperorders.go): kdraigo places it, and the hosted server
+// offers those tools too (RegisterPaperOrders).
 
 // AIOrders is this computer's executor, or why there is none.
 type AIOrders struct {
@@ -95,30 +97,42 @@ func RegisterOrders(s *server.MCPServer, d Deps) {
 	if a == nil {
 		a = &AIOrders{Path: orders.DefaultPath(), NotSetUp: true}
 	}
+	// Paper wallets need no executor: kdraigo places those itself.
+	srv := orders.HTTPServer{HTTP: d.HTTP}
 	addOrderSetup(s, a)
-	addOrderPropose(s, a)
-	addOrderList(s, a)
-	addOrderWithdraw(s, a)
-	addOrderPositions(s, a)
-	addOrderAction(s, a, orders.KindClose, "order_close",
+	addOrderPropose(s, a, srv)
+	addOrderListWith(s, srv, true)
+	addOrderWithdrawWith(s, srv, true)
+	addOrderPositions(s, a, srv)
+	addPaperWallets(s, srv)
+	addOrderAction(s, a, srv, orders.KindClose, "order_close",
 		"Propose closing the position on a contract, all of it, at market (reduce-only: it cannot flip it); once flat its stop and target are taken back. "+
 			"The user confirms it on kdraigo.com/chart or in Telegram, like an order. Only when the user asks to close.")
-	addOrderAction(s, a, orders.KindCancel, "order_cancel",
+	addOrderAction(s, a, srv, orders.KindCancel, "order_cancel",
 		"Propose cancelling a resting limit entry that has not filled (on Bybit its attached stop and target go with it). "+
 			"The user confirms it on kdraigo.com/chart or in Telegram. order_positions lists the resting entries and their ids.")
-	addOrderAction(s, a, orders.KindMoveStop, "order_move_stop",
+	addOrderAction(s, a, srv, orders.KindMoveStop, "order_move_stop",
 		"Propose moving an open position's stop to a new price: below the price now for a long (above for a short), at least the user's minimum gap from it, "+
 			"before the liquidation. The new stop is placed before the old one goes, so the position is never without one. The user confirms it on kdraigo.com/chart or in Telegram.")
 }
 
-func addOrderPositions(s *server.MCPServer, a *AIOrders) {
+// paperWalletLocal is the local tools' paper_wallet: set, the order is on a
+// paper wallet instead of the exchange account this computer trades.
+const paperWalletLocal = "Set it to act on one of the user's paper wallets instead of their exchange account: \"active\" (the one their perpetual charts trade) or a wallet's name or id (paper_wallets). " +
+	"kdraigo places paper orders itself after the user's yes: no exchange key, and this computer may be off. Empty: the exchange account this computer places orders on"
+
+func addOrderPositions(s *server.MCPServer, a *AIOrders, srv orders.HTTPServer) {
 	tool := mcp.NewTool("order_positions",
-		mcp.WithDescription("What is open on the exchange account this computer places orders on: each position (side, size, entry, the price now, P&L, its stop, the liquidation) "+
+		mcp.WithDescription("What is open on the exchange account this computer places orders on (or, with paper_wallet, on a paper wallet): each position (side, size, entry, the price now, P&L, its stop, the liquidation) "+
 			"and the resting entry orders with their ids. Read it before order_close, order_cancel or order_move_stop. Reads only."),
 		mcp.WithString("pair", mcp.Description("One contract, e.g. BTCUSDT; empty reads every open position")),
+		mcp.WithString("paper_wallet", mcp.Description(paperWalletLocal)),
 		readOnly(), local(),
 	)
 	add(s, tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if w := req.GetString("paper_wallet", ""); w != "" {
+			return paperPositions(ctx, srv, w), nil
+		}
 		e, why := a.ready()
 		if e == nil {
 			return mcp.NewToolResultError(strings.Replace(why, "Nothing was proposed.", "Nothing was read.", 1)), nil
@@ -168,10 +182,11 @@ func holdingsText(venue, network string, list []orders.Holding) string {
 	return b.String()
 }
 
-func addOrderAction(s *server.MCPServer, a *AIOrders, kind, name, desc string) {
+func addOrderAction(s *server.MCPServer, a *AIOrders, srv orders.HTTPServer, kind, name, desc string) {
 	opts := []mcp.ToolOption{
-		mcp.WithDescription(desc),
+		mcp.WithDescription(desc + " With paper_wallet, on a paper wallet: kdraigo carries it out after the user's yes."),
 		mcp.WithString("pair", mcp.Description("The contract, e.g. BTCUSDT; empty is the shared chart's")),
+		mcp.WithString("paper_wallet", mcp.Description(paperWalletLocal)),
 	}
 	switch kind {
 	case orders.KindCancel:
@@ -181,6 +196,9 @@ func addOrderAction(s *server.MCPServer, a *AIOrders, kind, name, desc string) {
 	}
 	opts = append(opts, additive(false), local())
 	add(s, mcp.NewTool(name, opts...), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if req.GetString("paper_wallet", "") != "" {
+			return paperPropose(ctx, srv, req, kind), nil
+		}
 		e, why := a.ready()
 		if e == nil {
 			return mcp.NewToolResultError(why), nil
@@ -310,19 +328,23 @@ func (a *AIOrders) setupText() string {
 	return b.String()
 }
 
-func addOrderPropose(s *server.MCPServer, a *AIOrders) {
+func addOrderPropose(s *server.MCPServer, a *AIOrders, srv orders.HTTPServer) {
 	tool := mcp.NewTool("order_propose",
 		mcp.WithDescription("Propose a long-position or short-position drawing on the user's chart as an order. This computer sizes it from the user's own limits on the exchange's numbers now, checks it, "+
 			"and sends the exact order to kdraigo.com for the user to confirm on the Chart page (5 minutes). It places nothing by itself: the order is placed from this computer only after the user's yes. "+
-			"Only when the user asked for an order; ask them market or limit if they did not say. chart_view lists the drawings and their ids."),
+			"Only when the user asked for an order; ask them market or limit if they did not say, and whether it is for their exchange account or a paper wallet (paper_wallet). chart_view lists the drawings and their ids."),
 		mcp.WithString("drawing_id", mcp.Required(), mcp.Description("The position drawing's id, from chart_view")),
 		mcp.WithString("entry_type", mcp.Required(), mcp.Enum("market", "limit"), mcp.Description("How the user chose to enter: at market now, or a limit at the drawing's entry")),
 		mcp.WithString("venue", mcp.Description("The drawing's chart venue; empty is the shared chart's")),
 		mcp.WithString("pair", mcp.Description("The drawing's pair, e.g. BTCUSDT; empty is the shared chart's")),
 		mcp.WithNumber("risk", mcp.Description("USDT the user wants to risk on this one, below their limit; empty uses the limit")),
+		mcp.WithString("paper_wallet", mcp.Description(paperWalletLocal)),
 		additive(false), local(),
 	)
 	add(s, tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if req.GetString("paper_wallet", "") != "" {
+			return paperPropose(ctx, srv, req, orders.KindOpen), nil
+		}
 		e, why := a.ready()
 		if e == nil {
 			return mcp.NewToolResultError(why), nil
@@ -372,19 +394,19 @@ func ticketText(t orderplan.Ticket) string {
 	return b.String()
 }
 
-func addOrderList(s *server.MCPServer, a *AIOrders) {
-	tool := mcp.NewTool("order_list",
-		mcp.WithDescription("The user's recent order proposals from their AI, newest first: waiting, confirmed, rejected, expired, placed (with what reached the exchange) or failed (and why). Reads only."),
+func addOrderListWith(s *server.MCPServer, srv orders.HTTPServer, onlyHere bool) {
+	opts := []mcp.ToolOption{
+		mcp.WithDescription("The user's recent order proposals from their AI, newest first, on their exchange account and their paper wallets: waiting, confirmed, rejected, expired, " +
+			"placed (with what reached the exchange) or failed (and why). Reads only."),
 		mcp.WithNumber("limit", mcp.Description("How many: 1–50, default 10")),
-		readOnly(), local(),
-	)
-	add(s, tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		if a.Exec == nil {
-			_, why := a.ready()
-			return mcp.NewToolResultError(why), nil
-		}
+		readOnly(),
+	}
+	if onlyHere {
+		opts = append(opts, local())
+	}
+	add(s, mcp.NewTool("order_list", opts...), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		limit := max(1, min(50, req.GetInt("limit", 10)))
-		list, err := a.Exec.Server().Proposals(ctx, limit)
+		list, err := srv.Proposals(ctx, limit)
 		if err != nil {
 			return toolErr(err), nil
 		}
@@ -398,6 +420,9 @@ func addOrderList(s *server.MCPServer, a *AIOrders) {
 				what = p.Kind
 			}
 			fmt.Fprintf(&b, "%s · %s · %s %s %s (%s) · %s", p.ID, p.CreatedAt.UTC().Format("2006-01-02 15:04"), strings.ToUpper(p.Side), p.Pair, p.Venue, what, p.Status)
+			if p.PaperName != nil {
+				fmt.Fprintf(&b, " · paper wallet %s", *p.PaperName)
+			}
 			if p.DecidedVia != nil {
 				fmt.Fprintf(&b, " via %s", *p.DecidedVia)
 			}
@@ -420,6 +445,7 @@ func resultLine(raw json.RawMessage) string {
 		Action      *orderexec.ActionResult `json:"action"`
 		Error       string                  `json:"error"`
 		Unprotected bool                    `json:"unprotected"`
+		Paper       bool                    `json:"paper"`
 	}
 	if json.Unmarshal(raw, &r) != nil {
 		return ""
@@ -433,7 +459,11 @@ func resultLine(raw json.RawMessage) string {
 			parts = append(parts, fmt.Sprintf("filled %s at %s", num(r.Result.Filled), num(r.Result.AvgPrice)))
 		}
 		if r.Result.Protected {
-			parts = append(parts, "stop and target on the exchange")
+			if r.Paper {
+				parts = append(parts, "stop and target held by the paper exchange")
+			} else {
+				parts = append(parts, "stop and target on the exchange")
+			}
 		}
 		if r.Result.Flattened {
 			parts = append(parts, "closed at market")
@@ -454,18 +484,17 @@ func resultLine(raw json.RawMessage) string {
 	return strings.Join(parts, "; ")
 }
 
-func addOrderWithdraw(s *server.MCPServer, a *AIOrders) {
-	tool := mcp.NewTool("order_withdraw",
+func addOrderWithdrawWith(s *server.MCPServer, srv orders.HTTPServer, onlyHere bool) {
+	opts := []mcp.ToolOption{
 		mcp.WithDescription("Withdraw an order proposal that still waits for the user, e.g. when the user changed their mind in the chat. A confirmed or placed order is not withdrawn here."),
 		mcp.WithString("id", mcp.Required(), mcp.Description("The proposal id")),
-		destructive(true), local(),
-	)
-	add(s, tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		if a.Exec == nil {
-			_, why := a.ready()
-			return mcp.NewToolResultError(why), nil
-		}
-		p, err := a.Exec.Server().Withdraw(ctx, req.GetString("id", ""))
+		destructive(true),
+	}
+	if onlyHere {
+		opts = append(opts, local())
+	}
+	add(s, mcp.NewTool("order_withdraw", opts...), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		p, err := srv.Withdraw(ctx, req.GetString("id", ""))
 		if err != nil {
 			return toolErr(err), nil
 		}
