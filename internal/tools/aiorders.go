@@ -242,7 +242,7 @@ func actionTextOn(a orderplan.Action, paper bool) string {
 	switch a.Kind {
 	case orderplan.ActClose:
 		fmt.Fprintf(&b, "CLOSE the %s %s position on %s: %s from %s, now %s, P&L %s USDT before fees; at market, then its stop and target are taken back.\n",
-			side, a.Symbol, a.Venue, num(a.Qty), num(a.Entry), num(a.Mark), num(a.PnL))
+			side, a.Symbol, a.Venue, num(a.Qty), num(a.Entry), atTick(a.Mark, a.TickSize), cents(a.PnL))
 	case orderplan.ActCancel:
 		fmt.Fprintf(&b, "CANCEL the resting %s entry %s on %s %s: %s at %s.\n", side, a.OrderID, a.Venue, a.Symbol, num(a.Qty), num(a.Price))
 	case orderplan.ActMoveStop:
@@ -250,27 +250,31 @@ func actionTextOn(a orderplan.Action, paper bool) string {
 		if a.OldStop > 0 {
 			from = num(a.OldStop)
 		}
-		if paper {
-			how = "The stop moves in place, keeping its link to the target."
-		}
-		if a.OldStop <= 0 {
+		switch {
+		case paper && a.OldStop <= 0:
+			how = "The position has no stop yet: one is placed, as one OCO with its target if it has one (one filling cancels the other)."
+		case paper:
+			how = "On the paper exchange the stop then works as one OCO with the position's target, if it has one (one filling cancels the other)."
+		case a.OldStop <= 0:
 			how = "The position has no stop yet: one is placed."
 		}
-		fmt.Fprintf(&b, "MOVE the stop of the %s %s position on %s: %s → %s (now %s); if it fills the position makes %s USDT. %s\n",
-			side, a.Symbol, a.Venue, from, num(a.Stop), num(a.Mark), num(a.PnL), how)
+		fmt.Fprintf(&b, "MOVE the stop of the %s %s position on %s: %s → %s (now %s); if it fills %s. %s\n",
+			side, a.Symbol, a.Venue, from, num(a.Stop), atTick(a.Mark, a.TickSize), ifFills(a.PnL), how)
 	case orderplan.ActMoveTarget:
 		from, how := "none", "The new target is placed before the old one goes."
 		if a.OldTarget > 0 {
 			from = num(a.OldTarget)
 		}
-		if paper {
-			how = "The target moves in place, keeping its link to the stop."
-		}
-		if a.OldTarget <= 0 {
+		switch {
+		case paper && a.OldTarget <= 0:
+			how = "The position has no target yet: one is placed (reduce-only, for all of it), as one OCO with its stop if it has one (one filling cancels the other)."
+		case paper:
+			how = "On the paper exchange the target then works as one OCO with the position's stop, if it has one (one filling cancels the other)."
+		case a.OldTarget <= 0:
 			how = "The position has no target yet: one is placed (reduce-only, for all of it)."
 		}
-		fmt.Fprintf(&b, "SET the take-profit of the %s %s position on %s: %s → %s (now %s); if it fills the position makes %s USDT. %s\n",
-			side, a.Symbol, a.Venue, from, num(a.Target), num(a.Mark), num(a.PnL), how)
+		fmt.Fprintf(&b, "SET the take-profit of the %s %s position on %s: %s → %s (now %s); if it fills %s. %s\n",
+			side, a.Symbol, a.Venue, from, num(a.Target), atTick(a.Mark, a.TickSize), ifFills(a.PnL), how)
 	}
 	passed := 0
 	for _, c := range a.Checks {
@@ -541,5 +545,30 @@ func num(v float64) string {
 }
 
 func pct(f float64) string { return num(f*100) + "%" }
+
+// atTick is a price on the contract's tick (the price now is not on it).
+func atTick(v, tick float64) string {
+	if tick <= 0 {
+		return num(v)
+	}
+	return num(math.Round(v/tick) * tick)
+}
+
+// cents is money to the cent with its sign: +34.75, -10.30, 0.00 (never -0).
+func cents(v float64) string {
+	c := math.Round(v * 100)
+	if c == 0 {
+		return "0.00"
+	}
+	return fmt.Sprintf("%+.2f", c/100)
+}
+
+// ifFills is what the position makes if a stop or target fills, before fees.
+func ifFills(pnl float64) string {
+	if math.Round(pnl*100) == 0 {
+		return "the position breaks even (before fees)"
+	}
+	return "the position makes " + cents(pnl) + " USDT (before fees)"
+}
 
 var _ = time.Second

@@ -104,9 +104,9 @@ func TestOrders_Instructions(t *testing.T) {
 func TestActionText(t *testing.T) {
 	m := orderplan.Market{TickSize: 0.1, StepSize: 0.001, Mark: 65000}
 	h := orderplan.Held{Side: orderplan.Long, Qty: 0.01, Entry: 64000, Stop: 63000}
-	assert.Equal(t, "CLOSE the LONG BTCUSDT position on bybit_futures: 0.01 from 64000, now 65000, P&L 10 USDT before fees; at market, then its stop and target are taken back.\nChecks: 2 of 2 passed.\n",
+	assert.Equal(t, "CLOSE the LONG BTCUSDT position on bybit_futures: 0.01 from 64000, now 65000, P&L +10.00 USDT before fees; at market, then its stop and target are taken back.\nChecks: 2 of 2 passed.\n",
 		actionText(orderplan.BuildClose("bybit_futures", "BTCUSDT", h, m)))
-	assert.Equal(t, "MOVE the stop of the LONG BTCUSDT position on bybit_futures: 63000 → 64000 (now 65000); if it fills the position makes 0 USDT. The new stop is placed before the old one goes.\nChecks: 5 of 5 passed.\n",
+	assert.Equal(t, "MOVE the stop of the LONG BTCUSDT position on bybit_futures: 63000 → 64000 (now 65000); if it fills the position breaks even (before fees). The new stop is placed before the old one goes.\nChecks: 5 of 5 passed.\n",
 		actionText(orderplan.BuildMoveStop("bybit_futures", "BTCUSDT", h, 64000, m, orderplan.Limits{MinStopGap: 0.002})))
 	assert.Equal(t, "CANCEL the resting LONG entry e-1 on bybit_futures BTCUSDT: 0.02 at 62000.\nChecks: 1 of 1 passed.\n",
 		actionText(orderplan.BuildCancel("bybit_futures", "BTCUSDT", orderplan.Resting{ID: "e-1", Side: orderplan.Long, Qty: 0.02, Price: 62000}, m)))

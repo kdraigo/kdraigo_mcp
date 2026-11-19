@@ -155,11 +155,18 @@ func TestActionTextOnPaper(t *testing.T) {
 	m := orderplan.Market{TickSize: 0.1, StepSize: 0.001, Mark: 65000}
 	h := orderplan.Held{Side: orderplan.Long, Qty: 0.01, Entry: 64000, Stop: 63000, Target: 67000}
 	stop := orderplan.BuildMoveStop("bybit_futures", "BTCUSDT", h, 64000, m, orderplan.Limits{MinStopGap: 0.002})
-	assert.Contains(t, actionTextOn(stop, true), "The stop moves in place, keeping its link to the target.")
+	assert.Contains(t, actionTextOn(stop, true), "On the paper exchange the stop then works as one OCO with the position's target, if it has one (one filling cancels the other).")
+	assert.NotContains(t, actionTextOn(stop, true), "-0", "a stop at entry breaks even (bug #60)")
+	assert.Contains(t, actionTextOn(stop, true), "if it fills the position breaks even (before fees)")
+	ada := orderplan.Action{Kind: orderplan.ActMoveStop, Symbol: "ADAUSDT", Side: orderplan.Short, OldStop: 0.157, Stop: 0.1554, Mark: 0.15405752, TickSize: 0.0001, PnL: -1e-12}
+	assert.Contains(t, actionTextOn(ada, true), "0.157 → 0.1554 (now 0.1541); if it fills the position breaks even", "the price now at the tick")
+	ada.Kind, ada.Target, ada.PnL = orderplan.ActMoveTarget, 0.15, 34.749
+	assert.Contains(t, actionTextOn(ada, true), "if it fills the position makes +34.75 USDT (before fees)")
 	assert.Contains(t, actionTextOn(stop, false), "The new stop is placed before the old one goes.")
 	none := orderplan.BuildMoveStop("bybit_futures", "BTCUSDT", orderplan.Held{Side: orderplan.Long, Qty: 0.01, Entry: 64000}, 64000, m, orderplan.Limits{MinStopGap: 0.002})
 	assert.Contains(t, actionText(none), "none → 64000")
 	assert.Contains(t, actionText(none), "The position has no stop yet: one is placed.")
+	assert.Contains(t, actionTextOn(none, true), "The position has no stop yet: one is placed, as one OCO with its target if it has one")
 	target := orderplan.BuildMoveTarget("bybit_futures", "BTCUSDT", h, 66000, m, orderplan.Limits{MinStopGap: 0.002})
 	assert.Contains(t, actionText(target), "SET the take-profit of the LONG BTCUSDT position on bybit_futures: 67000 → 66000")
 	assert.Contains(t, actionText(target), "The new target is placed before the old one goes.")
