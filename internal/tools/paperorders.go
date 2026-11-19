@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -173,6 +174,20 @@ func paperPropose(ctx context.Context, srv orders.HTTPServer, req mcp.CallToolRe
 	return toolText(b.String())
 }
 
+// priceAt is a price on the contract's tick; without the tick, to six
+// significant digits (the mark and the liquidation are not on the tick).
+func priceAt(v, tick float64) string {
+	if tick > 0 {
+		return atTick(v, tick)
+	}
+	return num(mustFloat(strconv.FormatFloat(v, 'g', 6, 64)))
+}
+
+func mustFloat(s string) float64 {
+	f, _ := strconv.ParseFloat(s, 64)
+	return f
+}
+
 func paperPositions(ctx context.Context, srv orders.HTTPServer, wallet string) *mcp.CallToolResult {
 	v, err := srv.PaperPositions(ctx, wallet)
 	if err != nil {
@@ -208,8 +223,9 @@ func paperPositions(ctx context.Context, srv orders.HTTPServer, wallet string) *
 			exit = "BUY"
 		}
 		stop, target := stopOf(p.Symbol, exit)
+		tick := v.Ticks[p.Symbol]
 		fmt.Fprintf(&b, "- %s %s %s from %s at %dx · now %s · P&L %s USDT · %s · %s · liquidation %s\n",
-			p.Side, p.Symbol, num(f(p.Size)), num(f(p.Entry)), p.Leverage, num(f(p.Mark)), num(math.Round(f(p.UnrealizedPnL)*100)/100), stop, target, num(f(p.LiquidationPrice)))
+			p.Side, p.Symbol, num(f(p.Size)), num(f(p.Entry)), p.Leverage, priceAt(f(p.Mark), tick), num(math.Round(f(p.UnrealizedPnL)*100)/100), stop, target, priceAt(f(p.LiquidationPrice), tick))
 	}
 	for _, o := range v.Orders {
 		if o.ReduceOnly || o.Type != "LIMIT" || o.Price == nil {

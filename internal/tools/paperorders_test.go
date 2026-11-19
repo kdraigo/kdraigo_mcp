@@ -104,7 +104,9 @@ func TestPaperOrders_HostedActionsAndReads(t *testing.T) {
 			{"id": "w-1", "kind": "wallet", "name": "Swing futures", "venue": "binance_futures"}, {"id": "m-1", "kind": "manual", "name": "Paper BTCUSDT", "venue": "binance_futures"}},
 			"active": map[string]string{"binance_futures": "w-1"}}),
 		"/research/api/v1/dev/orders/paper/positions": jsonReply(map[string]any{"account": map[string]any{"name": "Swing futures"}, "equity": "10184.2",
-			"positions": []map[string]any{{"symbol": "BTCUSDT", "side": "LONG", "size": "0.15", "entry_price": "64000", "leverage": 5, "mark": "64300", "unrealized_pnl": "45", "liquidation_price": "51800"}},
+			"positions": []map[string]any{{"symbol": "BTCUSDT", "side": "LONG", "size": "0.15", "entry_price": "64000", "leverage": 5, "mark": "64300.04444928", "unrealized_pnl": "45", "liquidation_price": "51800.0582329"},
+				{"symbol": "ADAUSDT", "side": "SHORT", "size": "6435", "entry_price": "0.1554", "leverage": 20, "mark": "0.15225952", "unrealized_pnl": "20.21", "liquidation_price": "0.16235821"}},
+			"ticks": map[string]float64{"BTCUSDT": 0.1},
 			"open_orders": []map[string]any{
 				{"id": 41, "symbol": "BTCUSDT", "side": "SELL", "type": "STOP_MARKET", "quantity": "0.15", "stop_price": "63600", "reduce_only": true},
 				{"id": 42, "symbol": "BTCUSDT", "side": "SELL", "type": "LIMIT", "quantity": "0.15", "price": "65900", "reduce_only": true},
@@ -124,7 +126,8 @@ func TestPaperOrders_HostedActionsAndReads(t *testing.T) {
 
 	out, _ = call(t, s, "order_positions", nil)
 	assert.Contains(t, out, "Paper wallet Swing futures")
-	assert.Contains(t, out, "LONG BTCUSDT 0.15 from 64000 at 5x · now 64300 · P&L 45 USDT · stop 63600 · target 65900 · liquidation 51800")
+	assert.Contains(t, out, "LONG BTCUSDT 0.15 from 64000 at 5x · now 64300 · P&L 45 USDT · stop 63600 · target 65900 · liquidation 51800.1", "at the tick (bug #58)")
+	assert.Contains(t, out, "SHORT ADAUSDT 6435 from 0.1554 at 20x · now 0.15226 · P&L 20.21 USDT · no stop · no target · liquidation 0.162358", "no tick: six significant digits")
 	assert.Contains(t, out, "resting entry 77 on BTCUSDT: LONG 0.05 at 63000")
 }
 

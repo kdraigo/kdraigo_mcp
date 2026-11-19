@@ -129,6 +129,8 @@ type PaperView struct {
 	Equity    json.Number     `json:"equity"`
 	Positions []PaperPosition `json:"positions"`
 	Orders    []PaperOrder    `json:"open_orders"`
+	// Ticks is each open position's price tick (research_service adds it).
+	Ticks map[string]float64 `json:"ticks"`
 }
 
 func (s HTTPServer) PaperPositions(ctx context.Context, wallet string) (PaperView, error) {
