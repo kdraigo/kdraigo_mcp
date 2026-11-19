@@ -119,6 +119,31 @@ func TestHandle_MoveStop(t *testing.T) {
 	assert.Equal(t, &orderexec.ActionResult{OrderID: "sl-new", Cancelled: []string{"sl-1"}}, srv.results[p.ID].Action)
 }
 
+// The new target rests before the old one goes; its price is in the hash.
+func TestHandle_MoveTarget(t *testing.T) {
+	e, srv, x := holdingRig(t)
+	ctx := context.Background()
+	_, _, err := e.ProposeAction(ctx, ActionInput{Kind: KindMoveTarget})
+	assert.ErrorContains(t, err, "target")
+	p, a, err := e.ProposeAction(ctx, ActionInput{Kind: KindMoveTarget, Target: 68000})
+	require.NoError(t, err)
+	assert.Equal(t, orderplan.ActMoveTarget, a.Kind)
+	assert.Equal(t, 67000.0, a.OldTarget)
+	assert.Equal(t, 68000.0, a.Target)
+	assert.Equal(t, storedAction(t, p).Hash, a.Hash)
+	srv.confirm(p.ID)
+	e.Handle(ctx, p.ID)
+	assert.Equal(t, []string{p.ID + " placed"}, srv.reports)
+	assert.Equal(t, []string{"SELL TARGET 0.01 @ 68000"}, x.placed)
+	assert.Equal(t, []string{"tp-1"}, x.cancelled)
+	assert.Equal(t, &orderexec.ActionResult{OrderID: "tp-new", Cancelled: []string{"tp-1"}}, srv.results[p.ID].Action)
+
+	// The wrong side of the price is refused before anything is proposed.
+	_, bad, err := e.ProposeAction(ctx, ActionInput{Kind: KindMoveTarget, Target: 64000})
+	assert.Error(t, err)
+	assert.False(t, bad.OK)
+}
+
 // What is open changed after the yes: nothing is done, the checks say why.
 func TestHandle_ActionRecheck(t *testing.T) {
 	e, srv, x := holdingRig(t)

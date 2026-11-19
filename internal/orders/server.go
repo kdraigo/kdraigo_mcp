@@ -45,10 +45,10 @@ type Proposal struct {
 	PaperName    *string `json:"paper_name,omitempty"`
 }
 
-// IsAction: a close, cancel or move_stop.
+// IsAction: a close, cancel, move_stop or move_target.
 func (p *Proposal) IsAction() bool {
 	switch p.Kind {
-	case KindClose, KindCancel, KindMoveStop:
+	case KindClose, KindCancel, KindMoveStop, KindMoveTarget:
 		return true
 	}
 	return false
@@ -74,10 +74,11 @@ func (p *Proposal) Action() (orderplan.Action, error) {
 
 // Proposal kinds (research_service db.Kind*).
 const (
-	KindOpen     = "open"
-	KindClose    = "close"
-	KindCancel   = "cancel"
-	KindMoveStop = "move_stop"
+	KindOpen       = "open"
+	KindClose      = "close"
+	KindCancel     = "cancel"
+	KindMoveStop   = "move_stop"
+	KindMoveTarget = "move_target"
 )
 
 // Proposal states (research_service db.Proposal*).

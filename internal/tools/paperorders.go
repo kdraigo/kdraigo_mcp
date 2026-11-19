@@ -53,6 +53,8 @@ func RegisterPaperOrders(s *server.MCPServer, d Deps) {
 			opts = append(opts, mcp.WithString("order_id", mcp.Description("The resting entry's id (order_positions); empty when only one rests")))
 		case orders.KindMoveStop:
 			opts = append(opts, mcp.WithNumber("stop", mcp.Required(), mcp.Description("The new stop's price")))
+		case orders.KindMoveTarget:
+			opts = append(opts, mcp.WithNumber("target", mcp.Required(), mcp.Description("The new take-profit's price")))
 		}
 		opts = append(opts, additive(false))
 		add(s, mcp.NewTool(name, opts...), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -61,6 +63,7 @@ func RegisterPaperOrders(s *server.MCPServer, d Deps) {
 	}
 	paperAction(orders.KindClose, "order_close", "Propose closing the position on a contract, all of it, at market; its stop and target are taken back. The user confirms it on kdraigo.com/chart or in Telegram. Only when the user asks to close.")
 	paperAction(orders.KindCancel, "order_cancel", "Propose cancelling a resting limit entry that has not filled, with its attached stop and target. The user confirms it on kdraigo.com/chart or in Telegram. order_positions lists the resting entries and their ids.")
+	paperAction(orders.KindMoveTarget, "order_move_target", "Propose setting an open position's take-profit, or moving the one it has, to a new price: above the price now for a long (below for a short), at least the wallet's minimum gap from it. It moves in place, keeping its OCO with the stop; a position with none gets one. The user confirms it on kdraigo.com/chart or in Telegram.")
 	paperAction(orders.KindMoveStop, "order_move_stop", "Propose moving an open position's stop to a new price: below the price now for a long (above for a short), at least the wallet's minimum gap from it, before the liquidation. It moves in place, keeping its OCO with the target. The user confirms it on kdraigo.com/chart or in Telegram.")
 	add(s, mcp.NewTool("order_positions",
 		mcp.WithDescription(paperOnly+"What is open on a paper wallet: each position (side, size, entry, the price now, P&L, its stop and target, the liquidation) and the resting entries with their ids. Read it before order_close, order_cancel or order_move_stop. Reads only."),
@@ -131,6 +134,8 @@ func paperPropose(ctx context.Context, srv orders.HTTPServer, req mcp.CallToolRe
 		in.OrderID = req.GetString("order_id", "")
 	case orders.KindMoveStop:
 		in.Stop = req.GetFloat("stop", 0)
+	case orders.KindMoveTarget:
+		in.Target = req.GetFloat("target", 0)
 	}
 	p, err := srv.ProposePaper(ctx, in)
 	if err != nil {
@@ -141,7 +146,7 @@ func paperPropose(ctx context.Context, srv orders.HTTPServer, req mcp.CallToolRe
 			case r.Ticket != nil:
 				text = ticketText(*r.Ticket) + "\n" + r.Message
 			case r.Action != nil:
-				text = actionText(*r.Action) + "\n" + r.Message
+				text = actionTextOn(*r.Action, true) + "\n" + r.Message
 			}
 			return mcp.NewToolResultError(text + "\nNothing was proposed.")
 		}
@@ -150,7 +155,7 @@ func paperPropose(ctx context.Context, srv orders.HTTPServer, req mcp.CallToolRe
 	var b strings.Builder
 	if p.IsAction() {
 		if a, err := p.Action(); err == nil {
-			b.WriteString(actionText(a))
+			b.WriteString(actionTextOn(a, true))
 		}
 	} else if t, err := p.OpenTicket(); err == nil {
 		b.WriteString(ticketText(t))

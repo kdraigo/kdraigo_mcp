@@ -127,3 +127,40 @@ func TestPaperOrders_HostedActionsAndReads(t *testing.T) {
 	assert.Contains(t, out, "LONG BTCUSDT 0.15 from 64000 at 5x · now 64300 · P&L 45 USDT · stop 63600 · target 65900 · liquidation 51800")
 	assert.Contains(t, out, "resting entry 77 on BTCUSDT: LONG 0.05 at 63000")
 }
+
+// The take-profit action (the user's ask, 2026-11-19): on a paper wallet
+// locally and on the hosted server, worded for paper (it moves in place).
+func TestPaperOrders_MoveTarget(t *testing.T) {
+	var got map[string]any
+	act := orderplan.Action{Kind: orderplan.ActMoveTarget, Venue: "binance_futures", Symbol: "ADAUSDT", Side: orderplan.Short, Qty: 6435, Entry: 0.1554, Target: 0.15, Mark: 0.1552, PnL: 34.749,
+		Checks: []orderplan.Check{{Name: "side", OK: true}}, OK: true}
+	routes := map[string]http.HandlerFunc{
+		paperProposals: recordBody(&got, http.StatusCreated, map[string]any{"id": "p-3", "kind": "move_target", "status": "confirmed", "ticket": act, "paper_name": "Futures wallet"}),
+	}
+	for _, s := range []*server.MCPServer{backend(t, routes), hostedBackend(t, routes)} {
+		out, isErr := call(t, s, "order_move_target", map[string]any{"paper_wallet": "active", "pair": "ADAUSDT", "target": 0.15})
+		require.False(t, isErr, out)
+		assert.Equal(t, "move_target", got["kind"])
+		assert.Equal(t, 0.15, got["target"])
+		assert.Equal(t, "binance_futures", got["venue"], "paper wallets trade the paper exchange's perpetuals")
+		assert.Contains(t, out, "SET the take-profit of the SHORT ADAUSDT position on binance_futures: none → 0.15")
+		assert.Contains(t, out, "The position has no target yet: one is placed")
+	}
+	tool := hostedBackend(t, routes).GetTool("order_move_target")
+	require.NotNil(t, tool)
+	assert.Contains(t, tool.Tool.InputSchema.Required, "target")
+}
+
+func TestActionTextOnPaper(t *testing.T) {
+	m := orderplan.Market{TickSize: 0.1, StepSize: 0.001, Mark: 65000}
+	h := orderplan.Held{Side: orderplan.Long, Qty: 0.01, Entry: 64000, Stop: 63000, Target: 67000}
+	stop := orderplan.BuildMoveStop("bybit_futures", "BTCUSDT", h, 64000, m, orderplan.Limits{MinStopGap: 0.002})
+	assert.Contains(t, actionTextOn(stop, true), "The stop moves in place, keeping its link to the target.")
+	assert.Contains(t, actionTextOn(stop, false), "The new stop is placed before the old one goes.")
+	none := orderplan.BuildMoveStop("bybit_futures", "BTCUSDT", orderplan.Held{Side: orderplan.Long, Qty: 0.01, Entry: 64000}, 64000, m, orderplan.Limits{MinStopGap: 0.002})
+	assert.Contains(t, actionText(none), "none → 64000")
+	assert.Contains(t, actionText(none), "The position has no stop yet: one is placed.")
+	target := orderplan.BuildMoveTarget("bybit_futures", "BTCUSDT", h, 66000, m, orderplan.Limits{MinStopGap: 0.002})
+	assert.Contains(t, actionText(target), "SET the take-profit of the LONG BTCUSDT position on bybit_futures: 67000 → 66000")
+	assert.Contains(t, actionText(target), "The new target is placed before the old one goes.")
+}

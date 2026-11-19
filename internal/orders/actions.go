@@ -17,10 +17,11 @@ import (
 
 // ActionInput is what the AI asks for.
 type ActionInput struct {
-	Kind        string // close, cancel, move_stop
+	Kind        string // close, cancel, move_stop, move_target
 	Venue, Pair string // empty: the shared chart's market
 	OrderID     string // cancel: the order; empty when exactly one entry rests
 	Stop        float64
+	Target      float64 // move_target: the new target
 }
 
 // ActionRefused is an action that did not pass its checks: nothing proposed.
@@ -34,9 +35,9 @@ func (r *ActionRefused) Error() string {
 // passes, sends it to kdraigo for the user to confirm.
 func (e *Executor) ProposeAction(ctx context.Context, in ActionInput) (*Proposal, *orderplan.Action, error) {
 	switch in.Kind {
-	case KindClose, KindCancel, KindMoveStop:
+	case KindClose, KindCancel, KindMoveStop, KindMoveTarget:
 	default:
-		return nil, nil, fmt.Errorf("kind %q: close, cancel or move_stop", in.Kind)
+		return nil, nil, fmt.Errorf("kind %q: close, cancel, move_stop or move_target", in.Kind)
 	}
 	venue, pair := in.Venue, strings.ToUpper(in.Pair)
 	if venue == "" {
@@ -105,6 +106,17 @@ func (e *Executor) ProposeAction(ctx context.Context, in ActionInput) (*Proposal
 			return nil, nil, err
 		}
 		a = orderplan.BuildMoveStop(venue, pair, *h, in.Stop, m, e.cfg.Limits.Plan())
+	case KindMoveTarget:
+		if h == nil {
+			return nil, nil, fmt.Errorf("no position is open on %s %s: no target to set", venue, pair)
+		}
+		if in.Target <= 0 {
+			return nil, nil, fmt.Errorf("target: the new target's price")
+		}
+		if err := mine("position"); err != nil {
+			return nil, nil, err
+		}
+		a = orderplan.BuildMoveTarget(venue, pair, *h, in.Target, m, e.cfg.Limits.Plan())
 	}
 	if !a.OK {
 		return nil, &a, &ActionRefused{Action: a}
@@ -219,6 +231,8 @@ func (e *Executor) recoverAction(ctx context.Context, p *Proposal) (string, resu
 		}
 	case orderplan.ActMoveStop:
 		done = h != nil && math.Abs(h.Stop-a.Stop) < a.TickSize/2
+	case orderplan.ActMoveTarget:
+		done = h != nil && math.Abs(h.Target-a.Target) < a.TickSize/2
 	}
 	if done {
 		doc.Error = "this computer stopped while carrying it out; the exchange shows it done"

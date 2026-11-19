@@ -28,6 +28,7 @@ type PaperInput struct {
 	Risk      float64 `json:"risk,omitempty"`
 	OrderID   string  `json:"order_id,omitempty"`
 	Stop      float64 `json:"stop,omitempty"`
+	Target    float64 `json:"target,omitempty"`
 }
 
 // PaperRefusal is a paper order that did not pass its checks: nothing was

@@ -40,6 +40,10 @@ func (x *exchange) PlaceOrder(_ context.Context, r *types.OrderRequest) (*types.
 		x.placed = append(x.placed, fmt.Sprintf("%s STOP %g @ %g", r.Side, r.Quantity, r.StopPrice))
 		return &types.Order{ID: "sl-new", Type: types.OrderTypeStopLoss, StopPrice: r.StopPrice, ReduceOnly: true}, nil
 	}
+	if r.Type == types.OrderTypeTakeProfitLimit {
+		x.placed = append(x.placed, fmt.Sprintf("%s TARGET %g @ %g", r.Side, r.Quantity, r.Price))
+		return &types.Order{ID: "tp-new", Type: types.OrderTypeTakeProfitLimit, Price: r.Price, ReduceOnly: true}, nil
+	}
 	x.placed = append(x.placed, fmt.Sprintf("%s %s %g", r.Side, r.Type, r.Quantity))
 	if r.ReduceOnly {
 		x.positions = nil // closed

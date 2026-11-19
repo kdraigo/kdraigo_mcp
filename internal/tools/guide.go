@@ -136,11 +136,11 @@ Answer with the two or three numbers that decide the question, then the warning 
 
 // localOrders is rule 11's second half on the local server, where orders
 // from the user's AI exist (the executor on this computer, and paper wallets).
-const localOrders = " Here an order exists only through order_propose, from a position drawing, when the user asks for it (and order_close, order_cancel, order_move_stop on what is open); the user confirms each on kdraigo.com or in Telegram before this computer acts. With paper_wallet it is on one of their paper wallets instead, placed by kdraigo after their yes. Ask which when they did not say. Never ask for exchange keys in the chat."
+const localOrders = " Here an order exists only through order_propose, from a position drawing, when the user asks for it (and order_close, order_cancel, order_move_stop, order_move_target on what is open); the user confirms each on kdraigo.com or in Telegram before this computer acts. With paper_wallet it is on one of their paper wallets instead, placed by kdraigo after their yes. Ask which when they did not say. Never ask for exchange keys in the chat."
 
 // hostedOrders is rule 11's second half on the hosted server: orders on
 // paper wallets only (Phase 9 of the paper exchange); no exchange account.
-const hostedOrders = " Here an order exists only on the user's paper wallets (virtual money): through order_propose, from a position drawing, when the user asks for it (and order_close, order_cancel, order_move_stop on what is open); the user confirms each on kdraigo.com or in Telegram, then kdraigo places it. A real-money order needs the local kdraigo-mcp on their computer. Never ask for exchange keys in the chat."
+const hostedOrders = " Here an order exists only on the user's paper wallets (virtual money): through order_propose, from a position drawing, when the user asks for it (and order_close, order_cancel, order_move_stop, order_move_target on what is open); the user confirms each on kdraigo.com or in Telegram, then kdraigo places it. A real-money order needs the local kdraigo-mcp on their computer. Never ask for exchange keys in the chat."
 
 // Instructions are what the server tells a client at connection: who it is
 // and the core rules, short enough that no client cuts them.

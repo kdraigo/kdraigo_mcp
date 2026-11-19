@@ -111,6 +111,9 @@ func RegisterOrders(s *server.MCPServer, d Deps) {
 	addOrderAction(s, a, srv, orders.KindCancel, "order_cancel",
 		"Propose cancelling a resting limit entry that has not filled (on Bybit its attached stop and target go with it). "+
 			"The user confirms it on kdraigo.com/chart or in Telegram. order_positions lists the resting entries and their ids.")
+	addOrderAction(s, a, srv, orders.KindMoveTarget, "order_move_target",
+		"Propose setting an open position's take-profit, or moving the one it has, to a new price: above the price now for a long (below for a short), at least the user's minimum gap from it. "+
+			"The new target is placed before the old one goes. The user confirms it on kdraigo.com/chart or in Telegram.")
 	addOrderAction(s, a, srv, orders.KindMoveStop, "order_move_stop",
 		"Propose moving an open position's stop to a new price: below the price now for a long (above for a short), at least the user's minimum gap from it, "+
 			"before the liquidation. The new stop is placed before the old one goes, so the position is never without one. The user confirms it on kdraigo.com/chart or in Telegram.")
@@ -193,6 +196,8 @@ func addOrderAction(s *server.MCPServer, a *AIOrders, srv orders.HTTPServer, kin
 		opts = append(opts, mcp.WithString("order_id", mcp.Description("The resting entry's id (order_positions); empty when only one rests")))
 	case orders.KindMoveStop:
 		opts = append(opts, mcp.WithNumber("stop", mcp.Required(), mcp.Description("The new stop's price")))
+	case orders.KindMoveTarget:
+		opts = append(opts, mcp.WithNumber("target", mcp.Required(), mcp.Description("The new take-profit's price")))
 	}
 	opts = append(opts, additive(false), local())
 	add(s, mcp.NewTool(name, opts...), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -204,7 +209,7 @@ func addOrderAction(s *server.MCPServer, a *AIOrders, srv orders.HTTPServer, kin
 			return mcp.NewToolResultError(why), nil
 		}
 		p, act, err := e.ProposeAction(ctx, orders.ActionInput{
-			Kind: kind, Pair: req.GetString("pair", ""), OrderID: req.GetString("order_id", ""), Stop: req.GetFloat("stop", 0),
+			Kind: kind, Pair: req.GetString("pair", ""), OrderID: req.GetString("order_id", ""), Stop: req.GetFloat("stop", 0), Target: req.GetFloat("target", 0),
 		})
 		if err != nil {
 			var r *orders.ActionRefused
@@ -225,8 +230,13 @@ func addOrderAction(s *server.MCPServer, a *AIOrders, srv orders.HTTPServer, kin
 	})
 }
 
-// actionText is the exact action, as the user will see it to confirm.
-func actionText(a orderplan.Action) string {
+// actionText is the exact action on the exchange account, as the user will
+// see it to confirm.
+func actionText(a orderplan.Action) string { return actionTextOn(a, false) }
+
+// actionTextOn words it for the exchange account or a paper wallet, where a
+// stop or target moves in place.
+func actionTextOn(a orderplan.Action, paper bool) string {
 	var b strings.Builder
 	side := strings.ToUpper(string(a.Side))
 	switch a.Kind {
@@ -236,12 +246,31 @@ func actionText(a orderplan.Action) string {
 	case orderplan.ActCancel:
 		fmt.Fprintf(&b, "CANCEL the resting %s entry %s on %s %s: %s at %s.\n", side, a.OrderID, a.Venue, a.Symbol, num(a.Qty), num(a.Price))
 	case orderplan.ActMoveStop:
-		from := "unknown"
+		from, how := "none", "The new stop is placed before the old one goes."
 		if a.OldStop > 0 {
 			from = num(a.OldStop)
 		}
-		fmt.Fprintf(&b, "MOVE the stop of the %s %s position on %s: %s → %s (now %s); if it fills the position makes %s USDT. The new stop is placed before the old one goes.\n",
-			side, a.Symbol, a.Venue, from, num(a.Stop), num(a.Mark), num(a.PnL))
+		if paper {
+			how = "The stop moves in place, keeping its link to the target."
+		}
+		if a.OldStop <= 0 {
+			how = "The position has no stop yet: one is placed."
+		}
+		fmt.Fprintf(&b, "MOVE the stop of the %s %s position on %s: %s → %s (now %s); if it fills the position makes %s USDT. %s\n",
+			side, a.Symbol, a.Venue, from, num(a.Stop), num(a.Mark), num(a.PnL), how)
+	case orderplan.ActMoveTarget:
+		from, how := "none", "The new target is placed before the old one goes."
+		if a.OldTarget > 0 {
+			from = num(a.OldTarget)
+		}
+		if paper {
+			how = "The target moves in place, keeping its link to the stop."
+		}
+		if a.OldTarget <= 0 {
+			how = "The position has no target yet: one is placed (reduce-only, for all of it)."
+		}
+		fmt.Fprintf(&b, "SET the take-profit of the %s %s position on %s: %s → %s (now %s); if it fills the position makes %s USDT. %s\n",
+			side, a.Symbol, a.Venue, from, num(a.Target), num(a.Mark), num(a.PnL), how)
 	}
 	passed := 0
 	for _, c := range a.Checks {
