@@ -660,7 +660,7 @@ func liveOrdersPageFor(all []liveOrder, q url.Values, limit, offset int) *orders
 
 func addListLiveSessions(s *server.MCPServer, d Deps) {
 	tool := mcp.NewTool("list_live_sessions",
-		mcp.WithDescription("The user's live trading bots: strategies running against an exchange (real money or an exchange testnet) that send telemetry to kdraigo. "+
+		mcp.WithDescription("The user's live trading bots: strategies running against an exchange (real money or an exchange testnet) that send telemetry to kdraigo, and paper accounts on kdraigo's paper exchange (environment paper_*: real markets, no money; the paper exchange reports them, and the user's bot need not be running). "+
 			"Use it for \"my bots\", \"live trading\", \"live sessions\" or \"how are my bots doing\". One row each, newest first: id, strategy, environment, status (RUNNING; DISCONNECTED = running, but no heartbeat for over 15 s; STOPPED), "+
 			"last heartbeat, uptime, orders placed, and the wallet now against the start. "+
 			"Then get_live_session for one bot now, and get_session_report, get_trades, get_breakdown, get_session_orders or get_analytics_series with session_type=live for its results. "+
