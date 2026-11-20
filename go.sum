@@ -27,8 +27,8 @@ github.com/hirokisan/bybit/v2 v2.39.0 h1:WvARP9urUd8/9bbZYRMdy+72iXZEeetM8v8oscb
 github.com/hirokisan/bybit/v2 v2.39.0/go.mod h1:VvczE8UADrerS08rJJyil6LFlWSnFfrXnVAZPOXwWIk=
 github.com/jpillora/backoff v1.0.0 h1:uvFg412JmmHBHw7iwprIxkPMI+sGQ4kzOWsMeHnm2EA=
 github.com/jpillora/backoff v1.0.0/go.mod h1:J/6gKK9jxlEcS3zixgDgUAsiuZ7yrSoa/FX5e0EB2j4=
-github.com/kdraigo/dev_sdk v1.13.0-rc.2 h1:m8MiuN78ceFHHASbQ94Rv/ZEjFjIOYx7BXgRIbbm6bI=
-github.com/kdraigo/dev_sdk v1.13.0-rc.2/go.mod h1:YP0s8o2shD0zOSIngiPNzhp99RJXWD35hTgVbqSZpJc=
+github.com/kdraigo/dev_sdk v1.13.0-rc.3 h1:Ef/gh6d0F/BkvGnlOkhHkd2Psf4BegNLsdd/GUS4Tmc=
+github.com/kdraigo/dev_sdk v1.13.0-rc.3/go.mod h1:YP0s8o2shD0zOSIngiPNzhp99RJXWD35hTgVbqSZpJc=
 github.com/kdraigo/workspaces_knowledge v0.1.0 h1:59QDyeL7uZmx0jKq+va2zxTjiisTeHXeuOP0MRyGLkQ=
 github.com/kdraigo/workspaces_knowledge v0.1.0/go.mod h1:98++rhmCr2pCev56GV1HurShuy0it34A5YV5YPjUuPI=
 github.com/kr/pretty v0.3.1 h1:flRD4NNwYAUpkphVc1HcthR4KEIFJ65n8Mw5qdRn3LE=

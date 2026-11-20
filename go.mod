@@ -4,7 +4,7 @@ go 1.25.9
 
 require (
 	github.com/google/uuid v1.6.0
-	github.com/kdraigo/dev_sdk v1.13.0-rc.2
+	github.com/kdraigo/dev_sdk v1.13.0-rc.3
 	github.com/kdraigo/workspaces_knowledge v0.1.0
 	github.com/mark3labs/mcp-go v0.54.1
 	github.com/stretchr/testify v1.11.1
