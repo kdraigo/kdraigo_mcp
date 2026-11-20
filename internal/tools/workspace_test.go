@@ -153,6 +153,21 @@ func TestWorkspaceRunStatus_Queued(t *testing.T) {
 	require.False(t, isErr, out)
 	assert.Contains(t, out, "Run "+runID+": queued, number 3 in line for a shared machine.")
 	assert.Contains(t, out, "Still queued: workspace_run_status run_id="+runID)
+	assert.NotContains(t, out, "Why it waits")
+}
+
+// While Hetzner has no machine free, the queued run says so, not only its
+// place in line (wiki bug #29).
+func TestWorkspaceRunStatus_QueuedForWantOfMachines(t *testing.T) {
+	note := "Hetzner, the cloud provider, has had no machine free since 10:01 UTC (4 tries); kdraigo keeps trying, and the run keeps its place for up to 30 minutes."
+	s := backend(t, map[string]http.HandlerFunc{
+		wsRoute("/runs/" + runID): jsonReply(map[string]any{"id": runID, "kind": "run", "status": "queued", "active": true,
+			"pool": "shared", "queue_position": 1, "queue_note": note}),
+		"/frontend-api/api/v1/dev/sessions": jsonReply([]any{}),
+	})
+	out, isErr := call(t, s, "workspace_run_status", map[string]any{"run_id": runID})
+	require.False(t, isErr, out)
+	assert.Contains(t, out, "Run "+runID+": queued, number 1 in line for a shared machine.\nWhy it waits: "+note)
 }
 
 func TestWorkspaceLogs_Pages(t *testing.T) {

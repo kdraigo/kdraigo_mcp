@@ -75,10 +75,13 @@ type (
 		AlreadyRunning bool `json:"already_running"`
 		// Pool is dedicated (a machine of the user's own) or shared;
 		// QueuePosition is a queued shared run's place, from 1.
-		Pool          string   `json:"pool"`
-		QueuePosition int      `json:"queue_position"`
-		SDKVersion    string   `json:"sdk_version"`
-		EnvNames      []string `json:"env_names"`
+		Pool          string `json:"pool"`
+		QueuePosition int    `json:"queue_position"`
+		// QueueNote says why a queued run waits when it is not the queue
+		// itself (Hetzner has no machine free).
+		QueueNote  string   `json:"queue_note"`
+		SDKVersion string   `json:"sdk_version"`
+		EnvNames   []string `json:"env_names"`
 		// Params are the values the run used for its declared parameters.
 		Params   map[string]string `json:"params"`
 		KeyID    string            `json:"key_id"`
@@ -677,6 +680,9 @@ func renderRunHead(doc *render.Doc, r *workspaceRun) {
 		head += fmt.Sprintf(", %s", r.FinishedAt.Sub(*r.StartedAt).Round(100*time.Millisecond))
 	}
 	doc.Line("%s.", head)
+	if r.Status == "queued" && r.QueueNote != "" {
+		doc.Line("Why it waits: %s", r.QueueNote)
+	}
 	if r.AlreadyRunning {
 		doc.Line("Already going: this %s was started a few minutes ago with the same files and settings (a repeated start), so it is followed rather than a second one started.", r.Kind)
 	}
