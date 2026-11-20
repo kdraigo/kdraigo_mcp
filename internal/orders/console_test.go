@@ -2,6 +2,8 @@ package orders
 
 import (
 	"context"
+	"errors"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -140,4 +142,63 @@ func TestSharedAccount(t *testing.T) {
 	x.positions = append(x.positions, &types.Position{Symbol: "ETHUSDT", Side: "LONG", Size: 0.5, EntryPrice: 3000})
 	_, _, err = e.ProposeAction(ctx, ActionInput{Kind: KindClose, Pair: "ETHUSDT"})
 	assert.ErrorContains(t, err, "this computer did not open the ETHUSDT position: AI orders act only on what they opened")
+}
+
+// Each account has its own console file; the file every account shared
+// before (bug #65) goes to the account that owns its session, and stays for
+// the other one.
+func TestConsoleFile(t *testing.T) {
+	ctx := context.Background()
+	legacy := func(dir, session string) {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, legacyConsoleFile), []byte(`{"session_id":"`+session+`","orders":{},"symbols":{"BTCUSDT":true}}`), 0o600))
+	}
+	asked := 0
+	answer := func(owned bool, err error) func(context.Context, string) (bool, error) {
+		return func(_ context.Context, session string) (bool, error) {
+			asked++
+			assert.Equal(t, "s-1", session)
+			return owned, err
+		}
+	}
+
+	// Nothing yet: a file of its own.
+	dir := t.TempDir()
+	wallet := ConsoleFile(ctx, dir, "key-wallet", answer(true, nil))
+	assert.Equal(t, filepath.Join(dir, "ai-orders-console-"+filepath.Base(wallet)[len("ai-orders-console-"):]), wallet)
+	assert.NotEqual(t, wallet, ConsoleFile(ctx, dir, "key-google", answer(true, nil)), "two accounts, two files")
+	assert.Zero(t, asked, "no shared file, nothing to ask")
+
+	// The shared file, owned by this account: taken over, its memory kept.
+	dir = t.TempDir()
+	legacy(dir, "s-1")
+	mine := ConsoleFile(ctx, dir, "key-wallet", answer(true, nil))
+	c, err := OpenConsole(mine, func(string) telemetry.Publisher { return &publisher{} })
+	require.NoError(t, err)
+	assert.Equal(t, "s-1", c.SessionID())
+	assert.True(t, c.state.Symbols["BTCUSDT"], "what AI orders opened is remembered")
+	assert.NoFileExists(t, filepath.Join(dir, legacyConsoleFile))
+	assert.Equal(t, mine, ConsoleFile(ctx, dir, "key-wallet", answer(false, nil)), "asked once: the file is its own now")
+
+	// Another account's (the Google login's MCP on the same computer): left
+	// for it, and this account starts a session of its own.
+	dir = t.TempDir()
+	legacy(dir, "s-1")
+	asked = 0
+	walletFile := ConsoleFile(ctx, dir, "key-wallet", answer(false, nil))
+	c, err = OpenConsole(walletFile, func(string) telemetry.Publisher { return &publisher{} })
+	require.NoError(t, err)
+	assert.NotEqual(t, "s-1", c.SessionID(), "a new session")
+	assert.FileExists(t, filepath.Join(dir, legacyConsoleFile), "kept for its owner")
+	googleFile := ConsoleFile(ctx, dir, "key-google", answer(true, nil))
+	assert.NotEqual(t, walletFile, googleFile)
+	g, err := OpenConsole(googleFile, func(string) telemetry.Publisher { return &publisher{} })
+	require.NoError(t, err)
+	assert.Equal(t, "s-1", g.SessionID(), "the owner takes it over")
+	assert.Equal(t, 2, asked)
+
+	// No answer: the shared file is used as it is, and asked about next time.
+	dir = t.TempDir()
+	legacy(dir, "s-1")
+	assert.Equal(t, filepath.Join(dir, legacyConsoleFile), ConsoleFile(ctx, dir, "key-wallet", answer(false, errors.New("offline"))))
+	assert.FileExists(t, filepath.Join(dir, legacyConsoleFile))
 }

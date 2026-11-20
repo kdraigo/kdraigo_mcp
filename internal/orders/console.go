@@ -3,12 +3,14 @@ package orders
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -55,8 +57,48 @@ type trackedOrder struct {
 // PublisherFor makes the session's publisher once its id is known.
 type PublisherFor func(sessionID string) telemetry.Publisher
 
-// OpenConsole reads the console's state (dir/ai-orders-console.json), making
-// the session id the first time.
+// legacyConsoleFile is the one console file every account on a computer
+// shared before bug #65.
+const legacyConsoleFile = "ai-orders-console.json"
+
+// ConsoleFile is the console file of the account a key belongs to,
+// ai-orders-console-<key>.json in dir. One file per computer, as before, let
+// two accounts' MCPs on one computer (a wallet and a Google login) share one
+// live-console session: live_trades gives a session to the account that
+// first wrote to it and refused the other's heartbeat every 5 s (wiki bug
+// #65). The shared file goes to the account that owns its session: owns
+// reports whether live_trades takes this key's events for it. A file whose
+// owner is not known yet (no answer) is used as it is, and asked about at
+// the next start.
+func ConsoleFile(ctx context.Context, dir, keyID string, owns func(ctx context.Context, sessionID string) (bool, error)) string {
+	sum := sha256.Sum256([]byte(keyID))
+	mine := filepath.Join(dir, "ai-orders-console-"+hex.EncodeToString(sum[:6])+".json")
+	legacy := filepath.Join(dir, legacyConsoleFile)
+	if _, err := os.Stat(mine); err == nil {
+		return mine
+	}
+	raw, err := os.ReadFile(legacy)
+	if err != nil {
+		return mine // none to take over
+	}
+	var st consoleState
+	if json.Unmarshal(raw, &st) == nil && st.SessionID != "" {
+		ok, err := owns(ctx, st.SessionID)
+		if err != nil {
+			return legacy
+		}
+		if !ok {
+			return mine // another account's: it stays for that account
+		}
+	}
+	if os.Rename(legacy, mine) != nil {
+		return legacy
+	}
+	return mine
+}
+
+// OpenConsole reads the console's state (ConsoleFile), making the session id
+// the first time.
 func OpenConsole(path string, pubFor PublisherFor) (*Console, error) {
 	c := &Console{path: path, now: time.Now}
 	raw, err := os.ReadFile(path)

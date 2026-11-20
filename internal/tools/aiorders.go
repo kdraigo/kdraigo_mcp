@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -78,7 +79,10 @@ func StartAIOrders(ctx context.Context, h *client.HTTP, tel Telemetry, logf func
 		return a
 	}
 	a.Exec = orders.New(cfg, orders.HTTPServer{HTTP: h}, orders.LiveVenues(cfg, keys), j, id, logf)
-	console, err := orders.OpenConsole(filepath.Join(dir, "ai-orders-console.json"), func(sessionID string) telemetry.Publisher {
+	owns := func(ctx context.Context, sessionID string) (bool, error) {
+		return consoleOwned(ctx, h, sessionID)
+	}
+	console, err := orders.OpenConsole(orders.ConsoleFile(ctx, dir, tel.KeyID, owns), func(sessionID string) telemetry.Publisher {
 		return telemetry.NewPublisher(sessionID, tel.URL, tel.KeyID, tel.PrivateKey, cfg.Venue, "", telemetry.WithEnvironment(string(cfg.Environment())))
 	})
 	if err != nil {
@@ -89,6 +93,28 @@ func StartAIOrders(ctx context.Context, h *client.HTTP, tel Telemetry, logf func
 	a.Exec.WithConsole(console)
 	go a.Exec.Run(ctx)
 	return a
+}
+
+// consoleOwned asks live_trades whether this key's events go to the session:
+// one heartbeat (the executor's first, sent a moment early). Taken, or a
+// session nobody has yet: this account's. "Session belongs to another user"
+// (403): another account's on this computer (wiki bug #65). No answer: not
+// known yet.
+func consoleOwned(ctx context.Context, h *client.HTTP, sessionID string) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	event := map[string]any{"session_id": sessionID, "event_type": "heartbeat",
+		"heartbeat": map[string]any{"recorded_at": time.Now().UTC(), "uptime_seconds": 0}}
+	raw, status, err := h.Do(ctx, true, client.HeaderStyleStandard, http.MethodPost, client.Live, "/api/v1/telemetry", nil, event)
+	switch {
+	case err != nil:
+		return false, err
+	case status == http.StatusForbidden && strings.Contains(string(raw), "another user"):
+		return false, nil
+	case status >= 500 || status == http.StatusTooManyRequests:
+		return false, fmt.Errorf("live_trades answered %d", status)
+	}
+	return true, nil
 }
 
 // RegisterOrders adds the order tools (local server only).
