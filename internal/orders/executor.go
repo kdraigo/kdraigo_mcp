@@ -403,7 +403,9 @@ func (e *Executor) placeConfirmed(ctx context.Context, p *Proposal) (string, res
 	}
 	res, err := orderexec.Open(ctx, v, t, orderexec.Options{Reason: map[string]any{"source": "ai-order", "proposal": p.ID}})
 	if res != nil {
-		e.track(ctx, v, t.Venue, t.Symbol, res.EntryID, res.StopID, res.TargetID)
+		// The failsafe's closing order too: without it the live console kept
+		// a position the venue no longer held (bug #69).
+		e.track(ctx, v, t.Venue, t.Symbol, res.EntryID, res.StopID, res.TargetID, res.CloseID)
 	}
 	if err != nil {
 		return StatusFailed, resultDoc{Result: res, Error: err.Error(), Unprotected: errors.Is(err, orderexec.ErrUnprotected)}

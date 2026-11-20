@@ -15,6 +15,7 @@ import (
 
 	"github.com/kdraigo/dev_sdk/orderexec"
 	"github.com/kdraigo/dev_sdk/orderplan"
+	"github.com/kdraigo/dev_sdk/telemetry"
 	"github.com/kdraigo/dev_sdk/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -25,12 +26,13 @@ import (
 // exchange is an in-memory Bybit: a contract, a wallet, positions, and the
 // orders that reach it.
 type exchange struct {
-	mu        sync.Mutex
-	mark      float64
-	positions []*types.Position
-	open      []*types.Order
-	placed    []string
-	cancelled []string
+	mu         sync.Mutex
+	bracketErr error
+	mark       float64
+	positions  []*types.Position
+	open       []*types.Order
+	placed     []string
+	cancelled  []string
 }
 
 func (x *exchange) PlaceOrder(_ context.Context, r *types.OrderRequest) (*types.Order, error) {
@@ -72,6 +74,9 @@ func (x *exchange) PlaceBracket(_ context.Context, r *types.BracketRequest) ([]*
 	x.mu.Lock()
 	defer x.mu.Unlock()
 	x.placed = append(x.placed, fmt.Sprintf("bracket %s %g tp %g sl %g", r.Side, r.Quantity, r.TakeProfitPrice, r.StopPrice))
+	if x.bracketErr != nil {
+		return nil, x.bracketErr
+	}
 	return []*types.Order{{ID: "tp", Type: types.OrderTypeTakeProfitLimit}, {ID: "sl", Type: types.OrderTypeStopLoss}}, nil
 }
 func (x *exchange) Contract(_ context.Context, exchange, symbol string) (*types.Contract, error) {
@@ -335,6 +340,27 @@ func TestHandle_Places(t *testing.T) {
 	require.NoError(t, err)
 	e.Handle(ctx, p2.ID)
 	assert.Len(t, x.placed, 2)
+}
+
+// Protection failed, so the executor closed at market: the closing order is
+// reported to the live console with the entry. Without it the console kept a
+// position the venue no longer held (bug #69).
+func TestHandle_FlattenedCloseIsReported(t *testing.T) {
+	e, srv, x := rig(t)
+	x.bracketErr = errors.New("live trading refused at the cap gate")
+	pub := &publisher{}
+	console, err := OpenConsole(filepath.Join(t.TempDir(), "console.json"), func(string) telemetry.Publisher { return pub })
+	require.NoError(t, err)
+	e.WithConsole(console)
+	ctx := context.Background()
+	p, _, err := e.Propose(ctx, ProposeInput{DrawingID: "ai_1", EntryType: orderplan.AtMarket})
+	require.NoError(t, err)
+	srv.confirm(p.ID)
+
+	e.Handle(ctx, p.ID)
+	assert.Equal(t, []string{"BUY MARKET 0.01", "bracket SELL 0.01 tp 67000 sl 64000", "SELL MARKET 0.01"}, x.placed)
+	assert.True(t, srv.results[p.ID].Result.Flattened)
+	assert.Equal(t, []string{"o-1 FILLED", "o-3 FILLED"}, pub.orders, "the entry and the close, so the console is flat too")
 }
 
 // The price moved past the tolerance after the yes: nothing is placed, and
