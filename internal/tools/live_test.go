@@ -112,6 +112,22 @@ func TestLiveSessionList(t *testing.T) {
 	}
 	assert.Contains(t, renderLiveSessions(nil, 20, 0, now), "No live sessions on this account")
 
+	// An archived session: out of the table, listed apart with its frozen result.
+	archived := list[0]
+	at := now.Add(-time.Hour)
+	basis := "stop"
+	unrealized := -1.5
+	archived.ArchivedAt, archived.ArchiveBasis = &at, &basis
+	archived.ArchiveResult = &liveArchiveResult{Asset: "USDT", Start: 300, Wallet: 309.6, Unrealized: &unrealized, Open: 1, Priced: 1,
+		ValuedAt: time.Date(2026, 11, 1, 10, 30, 0, 0, time.UTC)}
+	out = renderLiveSessions([]liveSession{list[1], archived}, 20, 0, now)
+	assert.Contains(t, out, "Live sessions 1–1 of 1, newest first")
+	assert.Contains(t, out, "## Archived by the user (1)")
+	assert.Contains(t, out, "old-session\t—\t—\tbinance_futures\t2026-11-01 11:00\tclosed +9.60 from USDT 300.00, open -1.50 (mark at its last report, 2026-11-01 10:30 UTC), total +8.10\n")
+	assert.Contains(t, renderLiveSessions([]liveSession{archived}, 20, 0, now), "No live sessions outside the archive.")
+	detail := renderLiveDetail(&liveDetailInputs{s: &archived, now: now})
+	assert.Contains(t, detail, "Archived by the user 2026-11-01 11:00 UTC: out of the Live pages' totals")
+
 	// Through the tool: newest first, from live_trades' signed route.
 	s := backend(t, map[string]http.HandlerFunc{liveBase: func(w http.ResponseWriter, r *http.Request) {
 		assert.NotEmpty(t, r.Header.Get("X-Signature"), "signed")

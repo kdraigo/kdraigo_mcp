@@ -44,6 +44,47 @@ type liveSession struct {
 	StrategyName     *string         `json:"strategy_name"`
 	StrategyConfig   json.RawMessage `json:"strategy_config"`
 	Environment      *string         `json:"environment"`
+	// The user archived it (live_trades 015): out of the Live pages' totals,
+	// with its result frozen then.
+	ArchivedAt    *time.Time         `json:"archived_at"`
+	ArchiveBasis  *string            `json:"archive_basis"`
+	ArchiveResult *liveArchiveResult `json:"archive_result"`
+}
+
+// liveArchiveResult is an archived session's frozen result: the wallet from
+// closed trades against the start, and open positions valued at the mark at
+// ValuedAt (its last report for basis "stop", the archive time for "now").
+type liveArchiveResult struct {
+	Asset      string    `json:"asset"`
+	Start      float64   `json:"start"`
+	Wallet     float64   `json:"wallet"`
+	Unrealized *float64  `json:"unrealized"`
+	Open       int       `json:"open"`
+	Priced     int       `json:"priced"`
+	ValuedAt   time.Time `json:"valued_at"`
+}
+
+// archiveText is the frozen result in a line.
+func archiveText(s *liveSession) string {
+	r := s.ArchiveResult
+	if r == nil {
+		return "no result recorded"
+	}
+	closed := r.Wallet - r.Start
+	when := "at its last report"
+	if s.ArchiveBasis != nil && *s.ArchiveBasis == "now" {
+		when = "when archived"
+	}
+	open := "nothing open"
+	total := closed
+	switch {
+	case r.Open > 0 && r.Unrealized == nil:
+		open = fmt.Sprintf("%d open, not priced", r.Open)
+	case r.Open > 0:
+		open = fmt.Sprintf("open %s (mark %s, %s UTC)", render.Signed(*r.Unrealized, 2), when, render.Time(r.ValuedAt))
+		total += *r.Unrealized
+	}
+	return fmt.Sprintf("closed %s from %s %s, %s, total %s", render.Signed(closed, 2), r.Asset, render.Num(r.Start, 2), open, render.Signed(total, 2))
 }
 
 type liveBalance struct {
@@ -456,13 +497,25 @@ func optStr(s *string) string {
 	return *s
 }
 
-func renderLiveSessions(list []liveSession, limit, offset int, now time.Time) string {
+func renderLiveSessions(all []liveSession, limit, offset int, now time.Time) string {
 	doc := render.New()
+	var list, archived []liveSession
+	for _, s := range all {
+		if s.ArchivedAt != nil {
+			archived = append(archived, s)
+		} else {
+			list = append(list, s)
+		}
+	}
 	total := len(list)
 	if offset >= total {
-		if total == 0 {
+		switch {
+		case total == 0 && len(archived) > 0:
+			doc.Line("No live sessions outside the archive.")
+			renderArchived(doc, archived)
+		case total == 0:
 			doc.Line("No live sessions on this account. A bot appears here once it sends telemetry (dev_sdk: Live.TelemetryURL, see get_sdk_docs).")
-		} else {
+		default:
 			doc.Line("No live sessions at offset %d (%d in all).", offset, total)
 		}
 		return doc.String()
@@ -481,9 +534,26 @@ func renderLiveSessions(list []liveSession, limit, offset int, now time.Time) st
 	doc.Table("", []string{"id", "strategy", "environment", "exchange", "first_symbol", "status", "started", "last_heartbeat", "uptime", "orders", "candles", "wallet_now", "wallet_start"}, rows, offsetFrom(offset))
 	if offset+len(page) < total {
 		doc.Line("More: offset=%d.", offset+len(page))
+	} else {
+		renderArchived(doc, archived)
 	}
 	doc.Line("Next: get_live_session for one bot now, get_session_report session_type=live for its results.")
 	return doc.String()
+}
+
+// renderArchived lists the sessions the user archived, apart: their money is
+// out of the Live pages' totals; each has its result frozen when archived.
+func renderArchived(doc *render.Doc, archived []liveSession) {
+	if len(archived) == 0 {
+		return
+	}
+	rows := make([][]string, 0, len(archived))
+	for i := range archived {
+		s := &archived[i]
+		rows = append(rows, []string{s.SessionID, render.Clip(optStr(s.StrategyName), 40), optStr(s.Environment), s.Exchange, render.Time(*s.ArchivedAt), archiveText(s)})
+	}
+	doc.Table(fmt.Sprintf("Archived by the user (%d): left out of the Live pages' totals, Home and the Telegram summary; each result frozen when archived", len(archived)),
+		[]string{"id", "strategy", "environment", "exchange", "archived", "frozen result"}, rows, nil)
 }
 
 // liveDetailInputs is what one live session's page is built from; only the
@@ -536,6 +606,10 @@ func renderLiveDetail(in *liveDetailInputs) string {
 		render.Time(s.StartedAt), span(time.Duration(s.UptimeSeconds)*time.Second), s.CandlesProcessed, s.OrdersPlaced, s.Exchange, s.Symbol)
 	if s.StoppedAt != nil {
 		doc.Line("Stopped %s UTC: %s", render.Time(*s.StoppedAt), optStr(s.StoppedReason))
+	}
+	if s.ArchivedAt != nil {
+		doc.Line("Archived by the user %s UTC: out of the Live pages' totals, Home and the Telegram summary. Frozen result: %s. Below is how it last reported.",
+			render.Time(*s.ArchivedAt), archiveText(s))
 	}
 	if strings.EqualFold(s.Status, "DISCONNECTED") {
 		doc.Line("No heartbeat for over 15 s: the bot, its machine or its connection is down, or it was killed without stopping. Its orders on the exchange stay where they are.")
@@ -662,7 +736,7 @@ func addListLiveSessions(s *server.MCPServer, d Deps) {
 	tool := mcp.NewTool("list_live_sessions",
 		mcp.WithDescription("The user's live trading bots: strategies running against an exchange (real money or an exchange testnet) that send telemetry to kdraigo, and paper accounts on kdraigo's paper exchange (environment paper_*: real markets, no money; the paper exchange reports them, and the user's bot need not be running). "+
 			"Use it for \"my bots\", \"live trading\", \"live sessions\" or \"how are my bots doing\". One row each, newest first: id, strategy, environment, status (RUNNING; DISCONNECTED = running, but no heartbeat for over 15 s; STOPPED), "+
-			"last heartbeat, uptime, orders placed, and the wallet now against the start. "+
+			"last heartbeat, uptime, orders placed, and the wallet now against the start. Sessions the user archived (stopped ones they took out of the totals) are listed apart, each with its result frozen when archived. "+
 			"Then get_live_session for one bot now, and get_session_report, get_trades, get_breakdown, get_session_orders or get_analytics_series with session_type=live for its results. "+
 			"Reading only: no tool starts, stops or trades a bot."),
 		mcp.WithNumber("limit", mcp.Description("Rows to return, at most 100"), mcp.DefaultNumber(20)),
