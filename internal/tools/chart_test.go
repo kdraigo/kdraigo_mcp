@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mark3labs/mcp-go/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -407,4 +408,17 @@ func TestChartGuide(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, strings.HasPrefix(scripts, "## Chart scripts and alerts"), "the scripts topic is still the scripts section")
 	assert.Contains(t, Instructions(true), "chart_view")
+}
+
+// The AI's chart writes are Plus and Pro (lib tiers ChartAIWrites); the tool
+// texts said Pro alone, so an AI on Plus could refuse to draw (bug #79).
+func TestChartWriteTools_NamePlusAndPro(t *testing.T) {
+	s := server.NewMCPServer("test", "0")
+	RegisterChart(s, Deps{})
+	for _, name := range []string{"chart_draw", "chart_remove", "chart_focus", "chart_replay", "chart_snapshot"} {
+		tool := s.GetTool(name)
+		require.NotNil(t, tool, name)
+		assert.Contains(t, tool.Tool.Description, "Part of Plus and Pro", name)
+		assert.NotContains(t, tool.Tool.Description, "Part of Pro", name)
+	}
 }

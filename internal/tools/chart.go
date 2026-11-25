@@ -679,7 +679,7 @@ func addChartDraw(s *server.MCPServer, d Deps) {
 		mcp.WithDescription("Draw on the user's shared chart: levels, trend lines, zones, a trade plan (entry, stop, target), arrows, text. The drawings appear on their chart at once, in your colour and marked as the AI's. "+
 			"Look first (chart_view) and place points on bars and prices that are there; draw a little and label it, then say in the chat what you drew and why. "+
 			"An id replaces that drawing of yours (to move a line); you cannot change the user's drawings. A position is a plan drawn for the user: nothing is ordered. Kinds and their points: chart_drawing_types. "+
-			"A text takes text_size (8–48), bold and italic. The venue and the pair must be a market the platform has: copy them from chart_view. Part of Pro; works only while the user shares the chart."),
+			"A text takes text_size (8–48), bold and italic. The venue and the pair must be a market the platform has: copy them from chart_view. Part of Plus and Pro; works only while the user shares the chart."),
 		mcp.WithString("venue", mcp.Required(), mcp.Description("The chart's venue as chart_view names it, e.g. binance_futures")),
 		mcp.WithString("pair", mcp.Required(), mcp.Description("The chart's pair as chart_view names it, e.g. BTCUSDT")),
 		mcp.WithArray("drawings", mcp.Required(), mcp.Description(`1–20 drawings, e.g. [{"kind":"horizontal-line","points":[{"price":64250}],"text":"weekly support"},{"kind":"trend-line","points":[{"time":"2026-11-12 10:00","price":63100},{"time":"2026-11-14 16:00","price":64250}]},{"kind":"text","points":[{"time":"2026-11-14 16:00","price":64900}],"text":"Range high","text_size":18,"bold":true},{"kind":"long-position","points":[{"time":"2026-11-16 14:00","price":64250},{"time":"2026-11-18 14:00"}],"stop":63600,"target":65900}]`),
@@ -723,7 +723,7 @@ func addChartDraw(s *server.MCPServer, d Deps) {
 
 func addChartRemove(s *server.MCPServer, d Deps) {
 	tool := mcp.NewTool("chart_remove",
-		mcp.WithDescription("Remove your own drawings from the user's chart: the ids given, or all of yours on that market. The user's drawings are theirs: you cannot remove them. Part of Pro; works only while the user shares the chart (with sharing off the chart stays as they left it)."),
+		mcp.WithDescription("Remove your own drawings from the user's chart: the ids given, or all of yours on that market. The user's drawings are theirs: you cannot remove them. Part of Plus and Pro; works only while the user shares the chart (with sharing off the chart stays as they left it)."),
 		mcp.WithString("venue", mcp.Required(), mcp.Description("The chart's venue, e.g. binance_futures")),
 		mcp.WithString("pair", mcp.Required(), mcp.Description("The chart's pair, e.g. BTCUSDT")),
 		mcp.WithArray("ids", mcp.Description("Ids of your drawings to remove (chart_view lists them, by AI)"), mcp.WithStringItems()),
@@ -774,7 +774,7 @@ func addChartFocus(s *server.MCPServer, d Deps) {
 	tool := mcp.NewTool("chart_focus",
 		mcp.WithDescription("Ask the user's shared chart to show something: another market, a timeframe, a time range, and optionally point at one bar and price with a few words (a pointer the user watches move there). "+
 			"Use it to show what you are talking about: the bar a level comes from, a past example in a lesson. Give only what should change; the rest stays. "+
-			"With \"Follow my AI\" on, the chart goes there; with it off, the user gets a button to go. Part of Pro."),
+			"With \"Follow my AI\" on, the chart goes there; with it off, the user gets a button to go. Part of Plus and Pro."),
 		mcp.WithString("venue", mcp.Description("Venue to show, with pair, e.g. binance_futures; left out: stay on the chart's market")),
 		mcp.WithString("pair", mcp.Description("Pair to show, with venue, e.g. ETHUSDT")),
 		mcp.WithString("timeframe", mcp.Description("Timeframe to show, e.g. 15m, 1h, 4h, 1d")),
@@ -833,7 +833,7 @@ func addChartFocus(s *server.MCPServer, d Deps) {
 func addChartReplay(s *server.MCPServer, d Deps) {
 	tool := mcp.NewTool("chart_replay",
 		mcp.WithDescription("Drive the replay on the user's shared chart, for a lesson or a practice run: start hides every bar after a time, step plays bars forward one call at a time, exit returns to the live chart. "+
-			"While it replays, chart_view lists bars only up to the playhead: ask the user what they expect, then step and look. The user's Chart page must be open. Part of Pro."),
+			"While it replays, chart_view lists bars only up to the playhead: ask the user what they expect, then step and look. The user's Chart page must be open. Part of Plus and Pro."),
 		mcp.WithString("action", mcp.Required(), mcp.Description("start, step or exit"), mcp.Enum("start", "step", "exit")),
 		mcp.WithString("time", mcp.Description("start: the bar the replay begins at, UTC (2026-11-10 00:00) or Unix seconds")),
 		mcp.WithNumber("bars", mcp.Description("step: how many bars to play, 1–500 (default 1)")),
@@ -909,7 +909,7 @@ func replayResult(action string, at int64, bars int, now *chartNow) string {
 func addChartSnapshot(s *server.MCPServer, d Deps) {
 	tool := mcp.NewTool("chart_snapshot",
 		mcp.WithDescription("Save the user's shared chart as it is now (market, timeframe, visible range, every drawing) and get a link that opens it that way again. "+
-			"Use it to log progress: after you and the user settle a reading, before and after a trade, at the end of a lesson. Put the link in a lab note (lab_note_write) with what was found. Part of Pro."),
+			"Use it to log progress: after you and the user settle a reading, before and after a trade, at the end of a lesson. Put the link in a lab note (lab_note_write) with what was found. Part of Plus and Pro."),
 		mcp.WithString("title", mcp.Required(), mcp.Description("What the snapshot shows, one line, e.g. \"BTC 4h: range low swept, plan long\"")),
 		mcp.WithString("lab", mcp.Description("The lab it belongs to (lab_list); left out: the lab the session logs to, or none")),
 		additive(false),

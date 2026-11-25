@@ -168,10 +168,10 @@ Results come back as a few header lines and tab-separated tables, with no JSON, 
 | `alert_renew` / `alert_delete` | Renew an expired alert, or a paused one once fixed; delete one. |
 | `chart_view` | The user's shared chart as it is now: the bars in view with every indicator's value at each bar, what scripts drew, and the drawings (theirs and the AI's). |
 | `chart_drawing_types` | The kinds of drawing the AI may make, with their points and an example. |
-| `chart_draw` / `chart_remove` | Draw on the user's chart (levels, lines, zones, a trade plan, text with its size and style), shown at once and marked as the AI's; remove the AI's own drawings. Pro, and only while the user shares the chart. |
-| `chart_focus` | Ask the chart to show a market, a timeframe or a time range, and point at a bar with a few words. Pro. |
-| `chart_replay` | Drive the chart's replay: start at a time, step bars, exit. Pro. |
-| `chart_snapshot` | Save the chart as it is and get a link that opens it that way again, for a lab note. Pro. |
+| `chart_draw` / `chart_remove` | Draw on the user's chart (levels, lines, zones, a trade plan, text with its size and style), shown at once and marked as the AI's; remove the AI's own drawings. Plus and Pro, and only while the user shares the chart. |
+| `chart_focus` | Ask the chart to show a market, a timeframe or a time range, and point at a bar with a few words. Plus and Pro. |
+| `chart_replay` | Drive the chart's replay: start at a time, step bars, exit. Plus and Pro. |
+| `chart_snapshot` | Save the chart as it is and get a link that opens it that way again, for a lab note. Plus and Pro. |
 | `create_backtest_session` | Replay only (`KDRAIGO_MCP_ENABLE_REPLAY=1`): creates a session on backtester_engine. |
 | `run_backtest_stream` | Replay only: steps a session to its end over WS without running strategy code. |
 
