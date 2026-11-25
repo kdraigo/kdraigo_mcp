@@ -42,7 +42,7 @@ func serve(args []string) error {
 	// can act on; the gateway's limits are the coarse layer in front.
 	limiter := hosted.NewLimiter(cfg.Limits, tools.IsLong, logger)
 	s := server.NewMCPServer("kdraigo", resolveVersion(), server.WithInstructions(tools.Instructions(true)),
-		server.WithToolHandlerMiddleware(limiter.Middleware))
+		server.WithToolHandlerMiddleware(limiter.Middleware), serverIcons())
 	tools.RegisterHosted(s, tools.Deps{HTTP: httpClient, Version: resolveVersion()})
 	// Stateless: each request stands alone and is authorized on its own; no
 	// session outlives its request.

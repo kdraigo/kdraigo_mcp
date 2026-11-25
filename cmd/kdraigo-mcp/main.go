@@ -83,7 +83,7 @@ func main() {
 		tools.Telemetry{URL: cfg.BacktesterEndpoint, KeyID: cfg.Auth.KeyID, PrivateKey: cfg.Auth.PrivateKey},
 		func(format string, a ...any) { fmt.Fprintf(os.Stderr, format+"\n", a...) })
 
-	s := server.NewMCPServer("kdraigo", resolveVersion(), server.WithInstructions(tools.Instructions(false)))
+	s := server.NewMCPServer("kdraigo", resolveVersion(), server.WithInstructions(tools.Instructions(false)), serverIcons())
 	tools.Register(s, deps)
 
 	err = server.ServeStdio(s)

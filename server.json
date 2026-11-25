@@ -11,6 +11,13 @@
   },
   "icons": [
     {
+      "src": "https://kdraigo.com/favicon.svg",
+      "mimeType": "image/svg+xml",
+      "sizes": [
+        "any"
+      ]
+    },
+    {
       "src": "https://kdraigo.com/icon-512.png",
       "mimeType": "image/png",
       "sizes": [
