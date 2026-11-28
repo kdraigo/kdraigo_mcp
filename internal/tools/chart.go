@@ -136,9 +136,9 @@ type (
 			Indicators []chartIndicator `json:"indicators"`
 			MarketRows []chartMarketRow `json:"market_rows"`
 			Replay     *int64           `json:"replay"`
-			Price      *float64      `json:"price"`
-			Visible    bool          `json:"visible"`
-			At         time.Time     `json:"at"`
+			Price      *float64         `json:"price"`
+			Visible    bool             `json:"visible"`
+			At         time.Time        `json:"at"`
 		} `json:"view"`
 		Live           bool           `json:"live"`
 		AgeSeconds     int            `json:"age_seconds"`
