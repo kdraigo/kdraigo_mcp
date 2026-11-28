@@ -36,9 +36,17 @@ type Config struct {
 	KeyFile string `yaml:"key_file"`
 	// AutoAllowed is this computer's consent to place without asking, when
 	// the user's switch on kdraigo.com is on too.
-	AutoAllowed bool         `yaml:"auto_allowed"`
-	Limits      LimitsConfig `yaml:"limits"`
-	Tolerance   struct {
+	AutoAllowed bool `yaml:"auto_allowed"`
+	// Executor is where the orders are placed: empty, by the executor in this
+	// kdraigo-mcp with the key here; "remote", by the user's order manager on a
+	// server of theirs (github.com/kdraigo/order_manager), which holds the key
+	// and the limits. This computer then keeps no exchange key.
+	Executor string `yaml:"executor"`
+	// Manager is the order manager's id with executor: remote; empty or
+	// "active" is the one connected.
+	Manager   string       `yaml:"manager"`
+	Limits    LimitsConfig `yaml:"limits"`
+	Tolerance struct {
 		PriceDrift float64 `yaml:"price_drift"`
 		RiskSlack  float64 `yaml:"risk_slack"`
 	} `yaml:"tolerance"`
@@ -128,8 +136,18 @@ func Load(path string) (*Config, error) {
 }
 
 // Problems is what stops orders, one sentence each; none means ready.
+// Remote: an order manager on a server places the orders (executor: remote).
+func (c *Config) Remote() bool { return c.Executor == "remote" }
+
 func (c *Config) Problems() []string {
 	var p []string
+	if c.Executor != "" && c.Executor != "remote" {
+		return []string{fmt.Sprintf("executor %q: remote (your order manager on a server), or leave it out (this computer)", c.Executor)}
+	}
+	if c.Remote() {
+		// The key and the limits are the order manager's, on its server.
+		return nil
+	}
 	if c.Venue != "bybit_futures" && c.Venue != "binance_futures" {
 		p = append(p, fmt.Sprintf("venue %q: bybit_futures or binance_futures", c.Venue))
 	}

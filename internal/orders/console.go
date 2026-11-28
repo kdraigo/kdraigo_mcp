@@ -71,8 +71,7 @@ const legacyConsoleFile = "ai-orders-console.json"
 // owner is not known yet (no answer) is used as it is, and asked about at
 // the next start.
 func ConsoleFile(ctx context.Context, dir, keyID string, owns func(ctx context.Context, sessionID string) (bool, error)) string {
-	sum := sha256.Sum256([]byte(keyID))
-	mine := filepath.Join(dir, "ai-orders-console-"+hex.EncodeToString(sum[:6])+".json")
+	mine := AccountConsoleFile(dir, keyID)
 	legacy := filepath.Join(dir, legacyConsoleFile)
 	if _, err := os.Stat(mine); err == nil {
 		return mine
@@ -95,6 +94,43 @@ func ConsoleFile(ctx context.Context, dir, keyID string, owns func(ctx context.C
 		return legacy
 	}
 	return mine
+}
+
+// keyTag names an account's files on this computer after its key.
+func keyTag(keyID string) string {
+	sum := sha256.Sum256([]byte(keyID))
+	return hex.EncodeToString(sum[:6])
+}
+
+// AccountConsoleFile is the console file of the account a key belongs to,
+// without taking over the shared one (ConsoleFile does that, once, in the
+// process that places).
+func AccountConsoleFile(dir, keyID string) string {
+	return filepath.Join(dir, "ai-orders-console-"+keyTag(keyID)+".json")
+}
+
+// ReadConsole reads a console file as it is now, to check against: a
+// standby executor's view of what AI orders opened (wiki bug #76). It reports
+// nothing and keeps nothing; no file yet is an empty memory.
+func ReadConsole(path string) (*Console, error) {
+	c := &Console{path: path, now: time.Now}
+	raw, err := os.ReadFile(path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+	case err != nil:
+		return nil, err
+	default:
+		if err := json.Unmarshal(raw, &c.state); err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+	}
+	if c.state.Orders == nil {
+		c.state.Orders = map[string]trackedOrder{}
+	}
+	if c.state.Symbols == nil {
+		c.state.Symbols = map[string]bool{}
+	}
+	return c, nil
 }
 
 // OpenConsole reads the console's state (ConsoleFile), making the session id

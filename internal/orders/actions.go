@@ -70,8 +70,12 @@ func (e *Executor) ProposeAction(ctx context.Context, in ActionInput) (*Proposal
 	}
 
 	// AI orders act only on what they opened (D4).
+	mem, err := e.memory()
+	if err != nil {
+		return nil, nil, err
+	}
 	mine := func(what string) error {
-		if e.console != nil && !e.console.Owns(pair) {
+		if mem != nil && !mem.Owns(pair) {
 			return fmt.Errorf("this computer did not open the %s %s: AI orders act only on what they opened", pair, what)
 		}
 		return nil
@@ -91,7 +95,7 @@ func (e *Executor) ProposeAction(ctx context.Context, in ActionInput) (*Proposal
 		if err != nil {
 			return nil, nil, err
 		}
-		if e.console != nil && !e.console.OwnsOrder(r.ID) {
+		if mem != nil && !mem.OwnsOrder(r.ID) {
 			return nil, nil, fmt.Errorf("this computer did not place the order %s on %s: AI orders act only on what they opened", r.ID, pair)
 		}
 		a = orderplan.BuildCancel(venue, pair, r, m)
@@ -280,13 +284,17 @@ func (e *Executor) Holdings(ctx context.Context, pair string) ([]Holding, error)
 			}
 		}
 	}
+	mem, err := e.memory()
+	if err != nil {
+		return nil, err
+	}
 	out := make([]Holding, 0, len(symbols))
 	for _, s := range symbols {
 		h, resting, _, err := orderexec.Holdings(ctx, v, e.cfg.Venue, s)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", s, err)
 		}
-		hv := Holding{Symbol: s, Held: h, Resting: resting, NotMine: e.console != nil && !e.console.Owns(s)}
+		hv := Holding{Symbol: s, Held: h, Resting: resting, NotMine: mem != nil && !mem.Owns(s)}
 		if c, err := v.Contract(ctx, e.cfg.Venue, s); err == nil {
 			hv.Mark = c.Mark
 		}

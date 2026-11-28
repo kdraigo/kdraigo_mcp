@@ -237,3 +237,66 @@ func (s HTTPServer) Events(ctx context.Context, executor string) (io.ReadCloser,
 	}
 	return resp.Body, nil
 }
+
+// PlanInput is POST /orders/plans: ask the user's order manager to build and
+// propose a position drawing's order (executor: remote).
+type PlanInput struct {
+	Venue     string  `json:"venue"`
+	Pair      string  `json:"pair"`
+	DrawingID string  `json:"drawing_id"`
+	EntryType string  `json:"entry_type"`
+	Risk      float64 `json:"risk,omitempty"`
+	Manager   string  `json:"manager,omitempty"`
+}
+
+// Request is an order manager's request as research_service keeps it:
+// pending, proposed (with the proposal it made), refused, failed, expired.
+type Request struct {
+	ID        string          `json:"id"`
+	Executor  string          `json:"executor"`
+	Status    string          `json:"status"`
+	Result    json.RawMessage `json:"result,omitempty"`
+	Proposal  *Proposal       `json:"proposal,omitempty"`
+	ExpiresAt time.Time       `json:"expires_at"`
+}
+
+// Request states (research_service db.Request*).
+const (
+	RequestPending  = "pending"
+	RequestProposed = "proposed"
+	RequestRefused  = "refused"
+	RequestFailed   = "failed"
+	RequestExpired  = "expired"
+)
+
+// ProposePlan sends the plan to the order manager and returns its answer, or
+// the request still pending after kdraigo's wait.
+func (s HTTPServer) ProposePlan(ctx context.Context, in PlanInput) (*Request, error) {
+	var r Request
+	return &r, s.do(ctx, http.MethodPost, "/orders/plans", nil, in, &r)
+}
+
+// Request reads one request again.
+func (s HTTPServer) Request(ctx context.Context, id string) (*Request, error) {
+	var r Request
+	return &r, s.do(ctx, http.MethodGet, "/orders/requests/"+url.PathEscape(id), nil, nil, &r)
+}
+
+// ActionPlanInput is POST /orders/actions: ask the order manager to build and
+// propose an action on what it holds (executor: remote).
+type ActionPlanInput struct {
+	Kind    string  `json:"kind"`
+	Venue   string  `json:"venue"`
+	Pair    string  `json:"pair"`
+	OrderID string  `json:"order_id,omitempty"`
+	Stop    float64 `json:"stop,omitempty"`
+	Target  float64 `json:"target,omitempty"`
+	Manager string  `json:"manager,omitempty"`
+}
+
+// ProposeActionPlan sends the action to the order manager and returns its
+// answer.
+func (s HTTPServer) ProposeActionPlan(ctx context.Context, in ActionPlanInput) (*Request, error) {
+	var r Request
+	return &r, s.do(ctx, http.MethodPost, "/orders/actions", nil, in, &r)
+}

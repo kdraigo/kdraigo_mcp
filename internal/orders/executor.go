@@ -71,13 +71,24 @@ type Executor struct {
 
 	place sync.Mutex // one placement at a time: each re-reads the account
 
+	// handover, asked as the executor stops, says whether another process
+	// took over (nil: none can).
+	handover func() bool
+
+	mu sync.Mutex
 	// console is the AI orders' live-console session and memory (nil: none).
 	console *Console
-
-	mu        sync.Mutex
-	connected bool
-	lastErr   string
-	busy      map[string]bool
+	// standby: another process holds the account's executor lock and places
+	// (wiki bug #76); this one proposes, and its checks read the console file
+	// at consolePath as it is at each check. holder is that process.
+	standby     bool
+	consolePath string
+	holder      Holder
+	// stopReported: the console was told "stopped" as this executor ended.
+	stopReported bool
+	connected    bool
+	lastErr      string
+	busy         map[string]bool
 }
 
 // New makes an executor. logf may be nil.
@@ -91,16 +102,85 @@ func New(cfg *Config, server Server, venues VenueFactory, journal *Journal, id s
 // WithConsole reports AI orders to the live console and keeps the memory of
 // what they opened.
 func (e *Executor) WithConsole(c *Console) *Executor {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	e.console = c
 	return e
 }
 
+// StandBy makes this executor propose only: another process holds the
+// account's executor lock and places what the user confirms (wiki bug #76).
+// The checks read that process's console file, consolePath, as it is at each
+// check. h is that process as it wrote itself down.
+func (e *Executor) StandBy(consolePath string, h Holder) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.standby, e.consolePath, e.holder = true, consolePath, h
+}
+
+// TakeOver makes this executor the one that places, with the journal and
+// the console read now: what the process that placed before left in them.
+// Run starts after it.
+func (e *Executor) TakeOver(j *Journal, c *Console) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.journal, e.console, e.standby, e.holder = j, c, false, Holder{}
+}
+
+// Standby says whether another process places, and which (zero: not known).
+func (e *Executor) Standby() (bool, Holder) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.standby, e.holder
+}
+
+// OnStop sets what the executor asks as it stops: whether another process on
+// this computer took over. Then the live-console session runs on with that
+// one's heartbeats, and is not told "stopped".
+func (e *Executor) OnStop(handedOver func() bool) { e.handover = handedOver }
+
+// StopReported: the console was told "stopped" as this executor ended (the
+// report is sent in the background, so the process gives it a moment).
+func (e *Executor) StopReported() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.stopReported
+}
+
+// live is the console of the process that places (nil: none).
+func (e *Executor) live() *Console {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.console
+}
+
+// memory is what the checks read for what AI orders opened: this process's
+// console while it places; for a standby, the console file of the process
+// that places, as it is now. Nil: no memory is kept, and the checks are off.
+func (e *Executor) memory() (*Console, error) {
+	e.mu.Lock()
+	c, path, standby := e.console, e.consolePath, e.standby
+	e.mu.Unlock()
+	if !standby || path == "" {
+		return c, nil
+	}
+	m, err := ReadConsole(path)
+	if err != nil {
+		return nil, fmt.Errorf("the AI orders' memory could not be read: %w", err)
+	}
+	return m, nil
+}
+
 // shared is what the account holds that AI orders did not place (D4).
 func (e *Executor) shared(ctx context.Context, v orderexec.Venue, venue, symbol string) error {
-	if e.console == nil {
+	c, err := e.memory()
+	if err != nil {
+		return err
+	}
+	if c == nil {
 		return nil
 	}
-	what, err := e.console.foreign(ctx, v, venue, symbol)
+	what, err := c.foreign(ctx, v, venue, symbol)
 	if err != nil {
 		return err
 	}
@@ -112,7 +192,8 @@ func (e *Executor) shared(ctx context.Context, v orderexec.Venue, venue, symbol 
 
 // track reports orders by id, read back from the venue, to the console.
 func (e *Executor) track(ctx context.Context, v orderexec.Venue, venue, symbol string, ids ...string) {
-	if e.console == nil {
+	c := e.live()
+	if c == nil {
 		return
 	}
 	var list []*types.Order
@@ -132,14 +213,16 @@ func (e *Executor) track(ctx context.Context, v orderexec.Venue, venue, symbol s
 		}
 		list = append(list, o)
 	}
-	e.console.Track(list...)
+	c.Track(list...)
 }
 
 // runConsole declares the session, heartbeats every 5 s (the live console
 // calls a session silent for 15 s disconnected), follows the AI orders'
-// fills every 30 s, and says "stopped" when ctx ends.
+// fills every 30 s, and says "stopped" when ctx ends, unless another process
+// on this computer took over (OnStop).
 func (e *Executor) runConsole(ctx context.Context) {
-	if e.console == nil {
+	c := e.live()
+	if c == nil {
 		return
 	}
 	start := e.now()
@@ -148,21 +231,28 @@ func (e *Executor) runConsole(ctx context.Context) {
 	if v, err := e.venues(ctx, "BTCUSDT"); err == nil {
 		acct, _ = v.GetAccount(ctx, e.cfg.Venue, orderexec.Settlement)
 	}
-	e.console.Start(meta, string(e.cfg.Environment()), acct)
+	c.Start(meta, string(e.cfg.Environment()), acct)
 	beat := time.NewTicker(5 * time.Second)
 	defer beat.Stop()
 	follow := time.NewTicker(30 * time.Second)
 	defer follow.Stop()
-	e.console.Heartbeat(0)
+	c.Heartbeat(0)
 	for {
 		select {
 		case <-ctx.Done():
-			e.console.Stopped("kdraigo-mcp on this computer closed: AI orders are not followed until it runs again")
+			if e.handover != nil && e.handover() {
+				e.logf("orders: another kdraigo-mcp on this computer took over the executor")
+				return
+			}
+			c.Stopped("kdraigo-mcp on this computer closed: AI orders are not followed until it runs again")
+			e.mu.Lock()
+			e.stopReported = true
+			e.mu.Unlock()
 			return
 		case <-beat.C:
-			e.console.Heartbeat(e.now().Sub(start))
+			c.Heartbeat(e.now().Sub(start))
 		case <-follow.C:
-			if err := e.console.Follow(ctx, e.venues, e.cfg.Venue); err != nil {
+			if err := c.Follow(ctx, e.venues, e.cfg.Venue); err != nil {
 				e.logf("orders: following the AI orders: %v", err)
 			}
 		}
@@ -279,9 +369,15 @@ func (e *Executor) Propose(ctx context.Context, in ProposeInput) (*Proposal, *or
 // Run keeps the executor's stream to kdraigo open until ctx ends, placing
 // each proposal the user confirms. A refusal (no plan with AI orders, a bad
 // key) waits ten minutes before asking again; anything else reconnects
-// sooner.
+// sooner. It returns once the console is done too (told "stopped", or
+// handed over).
 func (e *Executor) Run(ctx context.Context) {
-	go e.runConsole(ctx)
+	consoleDone := make(chan struct{})
+	go func() {
+		defer close(consoleDone)
+		e.runConsole(ctx)
+	}()
+	defer func() { <-consoleDone }()
 	wait := time.Second
 	for ctx.Err() == nil {
 		body, err := e.server.Events(ctx, e.id)

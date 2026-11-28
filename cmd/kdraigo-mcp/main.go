@@ -87,10 +87,11 @@ func main() {
 	tools.Register(s, deps)
 
 	err = server.ServeStdio(s)
-	// The AI orders' live-console session says it stopped; the report is
+	// The executor hands over to another kdraigo-mcp on this computer, or
+	// the AI orders' live-console session says it stopped: that report is
 	// sent in the background, so give it a moment before the process ends.
 	stopOrders()
-	if deps.Orders != nil && deps.Orders.Exec != nil {
+	if deps.Orders.Wait(2 * time.Second) {
 		time.Sleep(1500 * time.Millisecond)
 	}
 	if err != nil {

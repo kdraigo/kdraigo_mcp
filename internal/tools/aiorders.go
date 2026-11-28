@@ -35,6 +35,17 @@ type AIOrders struct {
 	Exec     *orders.Executor
 	NotSetUp bool
 	Problems []string
+	// Remote: the user's order manager on a server places the orders
+	// (executor: remote); this computer holds no exchange key. Manager is the
+	// one named, empty for the one connected.
+	Remote  bool
+	Manager string
+	Server  orders.HTTPServer
+	// Venue is the remote order manager's exchange when orders.yaml names it;
+	// empty: the shared chart's.
+	Venue string
+	// done closes once the executor stopped (placing or standing by).
+	done chan struct{}
 }
 
 // Telemetry is where the AI orders' live-console session reports, signed
@@ -62,6 +73,10 @@ func StartAIOrders(ctx context.Context, h *client.HTTP, tel Telemetry, logf func
 		a.Problems = p
 		return a
 	}
+	if cfg.Remote() {
+		a.Remote, a.Manager, a.Server, a.Venue = true, cfg.Manager, orders.HTTPServer{HTTP: h}, cfg.Venue
+		return a
+	}
 	keys, err := cfg.Keys()
 	if err != nil {
 		a.Problems = []string{err.Error()}
@@ -73,26 +88,136 @@ func StartAIOrders(ctx context.Context, h *client.HTTP, tel Telemetry, logf func
 		a.Problems = []string{"this computer's executor name could not be kept: " + err.Error()}
 		return a
 	}
-	j, err := orders.OpenJournal(filepath.Join(dir, "orders-journal.jsonl"))
-	if err != nil {
-		a.Problems = []string{"the orders journal could not be read: " + err.Error()}
-		return a
-	}
-	a.Exec = orders.New(cfg, orders.HTTPServer{HTTP: h}, orders.LiveVenues(cfg, keys), j, id, logf)
+	// The journal and the console are read when this process starts placing:
+	// a standby takes over what the process that placed before left in them.
 	owns := func(ctx context.Context, sessionID string) (bool, error) {
 		return consoleOwned(ctx, h, sessionID)
 	}
-	console, err := orders.OpenConsole(orders.ConsoleFile(ctx, dir, tel.KeyID, owns), func(sessionID string) telemetry.Publisher {
-		return telemetry.NewPublisher(sessionID, tel.URL, tel.KeyID, tel.PrivateKey, cfg.Venue, "", telemetry.WithEnvironment(string(cfg.Environment())))
-	})
+	open := func() (*orders.Journal, *orders.Console, error) {
+		j, err := orders.OpenJournal(filepath.Join(dir, "orders-journal.jsonl"))
+		if err != nil {
+			return nil, nil, errors.New("the orders journal could not be read: " + err.Error())
+		}
+		console, err := orders.OpenConsole(orders.ConsoleFile(ctx, dir, tel.KeyID, owns), func(sessionID string) telemetry.Publisher {
+			return telemetry.NewPublisher(sessionID, tel.URL, tel.KeyID, tel.PrivateKey, cfg.Venue, "", telemetry.WithEnvironment(string(cfg.Environment())))
+		})
+		if err != nil {
+			return nil, nil, errors.New("the AI orders' memory (ai-orders-console.json) could not be read: " + err.Error())
+		}
+		return j, console, nil
+	}
+	a.Exec = orders.New(cfg, orders.HTTPServer{HTTP: h}, orders.LiveVenues(cfg, keys), nil, id, logf)
+	a.done = make(chan struct{})
+
+	// One executor per account on this computer (wiki bug #76): the first
+	// kdraigo-mcp to hold the lock places; the others stand by.
+	lock, holder, err := orders.TryLockExecutor(dir, tel.KeyID)
 	if err != nil {
 		a.Exec = nil
-		a.Problems = []string{"the AI orders' memory (ai-orders-console.json) could not be read: " + err.Error()}
+		a.Problems = []string{"this computer's executor lock could not be taken in " + dir + ": " + err.Error()}
 		return a
 	}
-	a.Exec.WithConsole(console)
-	go a.Exec.Run(ctx)
+	if lock != nil {
+		j, console, err := open()
+		if err != nil {
+			lock.Release()
+			a.Exec = nil
+			a.Problems = []string{err.Error()}
+			return a
+		}
+		a.Exec.TakeOver(j, console)
+		go func() {
+			defer close(a.done)
+			a.place(ctx, lock)
+		}()
+		return a
+	}
+	a.Exec.StandBy(orders.AccountConsoleFile(dir, tel.KeyID), holder)
+	logf("orders: another kdraigo-mcp on this computer (process %d) places AI orders; this one proposes, and takes over if it closes", holder.PID)
+	go func() {
+		defer close(a.done)
+		a.standBy(ctx, dir, tel.KeyID, open, logf)
+	}()
 	return a
+}
+
+// How a standby watches the executor lock, and how long the process that
+// places waits, as it closes, for one to take over before it tells the live
+// console "stopped" (the process has about two seconds to end).
+const (
+	standbyPoll  = 150 * time.Millisecond
+	handoverWait = 500 * time.Millisecond
+)
+
+// place runs the executor while ctx lives, holding the lock; as it stops, it
+// lets the lock go and waits a moment for a standby to take over.
+func (a *AIOrders) place(ctx context.Context, lock *orders.ExecutorLock) {
+	a.Exec.OnStop(func() bool {
+		lock.Release()
+		return lock.TakenOver(handoverWait)
+	})
+	a.Exec.Run(ctx)
+	lock.Release()
+}
+
+// standBy watches the executor lock and takes over when the process that
+// places lets it go (its Claude Code session closed).
+func (a *AIOrders) standBy(ctx context.Context, dir, keyID string, open func() (*orders.Journal, *orders.Console, error), logf func(string, ...any)) {
+	consolePath := orders.AccountConsoleFile(dir, keyID)
+	wait := standbyPoll
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
+		}
+		wait = standbyPoll
+		lock, holder, err := orders.TryLockExecutor(dir, keyID)
+		if err != nil {
+			logf("orders: the executor lock: %v (again in 30s)", err)
+			wait = 30 * time.Second
+			continue
+		}
+		if lock == nil {
+			a.Exec.StandBy(consolePath, holder)
+			continue
+		}
+		j, console, err := open()
+		if err != nil {
+			lock.Release()
+			logf("orders: could not take over the executor: %v (again in 30s)", err)
+			wait = 30 * time.Second
+			continue
+		}
+		a.Exec.TakeOver(j, console)
+		logf("orders: this kdraigo-mcp places AI orders now (the one before it closed)")
+		a.place(ctx, lock)
+		return
+	}
+}
+
+// Wait gives the executor up to d to stop once its context has ended. True
+// when it told the live console "stopped": that report is sent in the
+// background, so the process gives it a moment before it ends.
+func (a *AIOrders) Wait(d time.Duration) bool {
+	if a == nil || a.Exec == nil || a.done == nil {
+		return false
+	}
+	select {
+	case <-a.done:
+	case <-time.After(d):
+	}
+	return a.Exec.StopReported()
+}
+
+// standbyText is order_setup's line in a kdraigo-mcp that stands by: another
+// Claude Code session's places the orders (wiki bug #76).
+func standbyText(h orders.Holder) string {
+	who := "another kdraigo-mcp on this computer (another Claude Code session's)"
+	if h.PID > 0 {
+		who = fmt.Sprintf("another kdraigo-mcp on this computer (process %d, another Claude Code session's, running since %s UTC)", h.PID, h.Started.UTC().Format("2006-01-02 15:04"))
+	}
+	return "One executor per computer: " + who + " places the confirmed orders. Orders proposed here go to it once the user confirms, and it checks and places them with the orders file as it read it when it started. This one takes over if that one closes.\n"
 }
 
 // consoleOwned asks live_trades whether this key's events go to the session:
@@ -230,6 +355,9 @@ func addOrderAction(s *server.MCPServer, a *AIOrders, srv orders.HTTPServer, kin
 		if req.GetString("paper_wallet", "") != "" {
 			return paperPropose(ctx, srv, req, kind), nil
 		}
+		if a.Remote {
+			return a.actRemote(ctx, kind, req), nil
+		}
 		e, why := a.ready()
 		if e == nil {
 			return mcp.NewToolResultError(why), nil
@@ -315,6 +443,8 @@ func actionTextOn(a orderplan.Action, paper bool) string {
 // ready is the executor, or the text saying why there is none.
 func (a *AIOrders) ready() (*orders.Executor, string) {
 	switch {
+	case a.Remote:
+		return nil, "Orders go to your order manager on its server (executor: remote in " + a.Path + "): what it holds is read on the exchange or the Live page for now (order_positions through it comes in the next release). Nothing was done."
 	case a.Exec != nil:
 		return a.Exec, ""
 	case a.NotSetUp:
@@ -338,6 +468,16 @@ func addOrderSetup(s *server.MCPServer, a *AIOrders) {
 func (a *AIOrders) setupText() string {
 	var b strings.Builder
 	dir := filepath.Dir(a.Path)
+	if a.Remote {
+		who := "the one connected"
+		if a.Manager != "" && a.Manager != "active" {
+			who = a.Manager
+		}
+		fmt.Fprintf(&b, "Orders from your AI go to your order manager (%s), a program on a server of yours that holds the exchange key and your limits (executor: remote in %s). This computer holds no exchange key.\n", who, a.Path)
+		b.WriteString("order_propose sends a position drawing to it through kdraigo: it builds the exact order on its account's numbers and its limits, and the user confirms it on kdraigo.com/chart or in Telegram; it places it with its stop and target, also while this computer is closed.\n")
+		b.WriteString("Through it: order_propose (a position from a drawing), order_close, order_cancel, order_move_stop and order_move_target, each confirmed by the user. order_positions through it comes in the next release: what it holds shows on the Live page and the exchange.\n")
+		return b.String()
+	}
 	switch {
 	case a.NotSetUp:
 		fmt.Fprintf(&b, "Orders from your AI are not set up on this computer (no %s).\n\n", a.Path)
@@ -363,7 +503,10 @@ func (a *AIOrders) setupText() string {
 	if c.Mainnet() && strings.TrimSpace(os.Getenv("KDRAIGO_LIVE_ARMED")) != "1" {
 		b.WriteString("Mainnet is not armed: real orders also need KDRAIGO_LIVE_ARMED=1 in this MCP server's environment (Claude Code's MCP settings). Until then every order is refused.\n")
 	}
+	standby, holder := e.Standby()
 	switch {
+	case standby:
+		b.WriteString(standbyText(holder))
 	case on:
 		b.WriteString("kdraigo hears this computer now: confirmed orders are placed while this Claude Code session stays open.\n")
 	case last != "":
@@ -403,6 +546,9 @@ func addOrderPropose(s *server.MCPServer, a *AIOrders, srv orders.HTTPServer) {
 	add(s, tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if req.GetString("paper_wallet", "") != "" {
 			return paperPropose(ctx, srv, req, orders.KindOpen), nil
+		}
+		if a.Remote {
+			return a.proposeRemote(ctx, req), nil
 		}
 		e, why := a.ready()
 		if e == nil {
@@ -598,3 +744,111 @@ func ifFills(pnl float64) string {
 }
 
 var _ = time.Second
+
+// proposeRemote sends a drawing to the user's order manager (executor:
+// remote) and says what it answered: the exact order waiting for the user,
+// or why it refused.
+func (a *AIOrders) proposeRemote(ctx context.Context, req mcp.CallToolRequest) *mcp.CallToolResult {
+	r, err := a.Server.ProposePlan(ctx, orders.PlanInput{
+		Venue: req.GetString("venue", ""), Pair: strings.ToUpper(req.GetString("pair", "")),
+		DrawingID: req.GetString("drawing_id", ""), EntryType: req.GetString("entry_type", ""),
+		Risk: req.GetFloat("risk", 0), Manager: a.Manager,
+	})
+	if err != nil {
+		return toolErr(err)
+	}
+	var doc struct {
+		Error  string            `json:"error"`
+		Ticket *orderplan.Ticket `json:"ticket"`
+	}
+	_ = json.Unmarshal(r.Result, &doc)
+	switch r.Status {
+	case orders.RequestProposed:
+		if r.Proposal == nil {
+			return toolText("Your order manager proposed it; order_list shows the proposal.")
+		}
+		var b strings.Builder
+		if t, err := r.Proposal.OpenTicket(); err == nil {
+			b.WriteString(ticketText(t))
+		}
+		if r.Proposal.Status == orders.StatusConfirmed {
+			fmt.Fprintf(&b, "\nProposal %s was confirmed without asking (the user's switch on kdraigo.com and auto_allowed on the order manager are both on): the order manager places it now. order_list shows the result.", r.Proposal.ID)
+		} else {
+			fmt.Fprintf(&b, "\nProposal %s, built by your order manager, waits for the user's yes on kdraigo.com/chart until %s UTC. Tell them to check the exact order there. The order manager places it, also while this computer is closed; order_list shows what happened.",
+				r.Proposal.ID, r.Proposal.ExpiresAt.UTC().Format("15:04"))
+		}
+		return toolText(b.String())
+	case orders.RequestRefused:
+		msg := "Your order manager refused it, so nothing was proposed"
+		if doc.Error != "" {
+			msg += ":\n" + doc.Error
+		}
+		if doc.Ticket != nil {
+			msg = ticketText(*doc.Ticket) + "\n" + msg
+		}
+		return mcp.NewToolResultError(msg)
+	case orders.RequestFailed:
+		return mcp.NewToolResultError("Your order manager could not build it: " + doc.Error + ". Nothing was proposed.")
+	case orders.RequestExpired:
+		return mcp.NewToolResultError("Your order manager did not answer within a minute (is it running?). Nothing was proposed.")
+	}
+	return toolText(fmt.Sprintf("Your order manager has not answered yet (request %s, until %s UTC): order_list shows the proposal once it does.", r.ID, r.ExpiresAt.UTC().Format("15:04")))
+}
+
+// actRemote asks the user's order manager (executor: remote) to build and
+// propose an action on what it holds.
+func (a *AIOrders) actRemote(ctx context.Context, kind string, req mcp.CallToolRequest) *mcp.CallToolResult {
+	venue, pair := a.Venue, strings.ToUpper(req.GetString("pair", ""))
+	if venue == "" || pair == "" {
+		cv, cp, err := a.Server.ChartMarket(ctx)
+		if err != nil {
+			return mcp.NewToolResultError("Name the pair, or share the chart on it: " + err.Error())
+		}
+		if venue == "" {
+			venue = cv
+		}
+		if pair == "" {
+			pair = cp
+		}
+	}
+	r, err := a.Server.ProposeActionPlan(ctx, orders.ActionPlanInput{
+		Kind: kind, Venue: venue, Pair: pair, OrderID: req.GetString("order_id", ""),
+		Stop: req.GetFloat("stop", 0), Target: req.GetFloat("target", 0), Manager: a.Manager,
+	})
+	if err != nil {
+		return toolErr(err)
+	}
+	var doc struct {
+		Error  string            `json:"error"`
+		Action *orderplan.Action `json:"action"`
+	}
+	_ = json.Unmarshal(r.Result, &doc)
+	switch r.Status {
+	case orders.RequestProposed:
+		var b strings.Builder
+		if doc.Action != nil {
+			b.WriteString(actionText(*doc.Action))
+		}
+		if r.Proposal != nil && r.Proposal.Status == orders.StatusConfirmed {
+			fmt.Fprintf(&b, "\nProposal %s was confirmed without asking: the order manager does it now. order_list shows the result.", r.Proposal.ID)
+		} else if r.Proposal != nil {
+			fmt.Fprintf(&b, "\nProposal %s, built by your order manager, waits for the user's yes on kdraigo.com/chart or in Telegram until %s UTC. The order manager carries it out, also while this computer is closed; order_list shows what happened.",
+				r.Proposal.ID, r.Proposal.ExpiresAt.UTC().Format("15:04"))
+		}
+		return toolText(b.String())
+	case orders.RequestRefused:
+		msg := "Your order manager refused it, so nothing was proposed"
+		if doc.Error != "" {
+			msg += ": " + doc.Error
+		}
+		if doc.Action != nil {
+			msg = actionText(*doc.Action) + "\n" + msg
+		}
+		return mcp.NewToolResultError(msg)
+	case orders.RequestFailed:
+		return mcp.NewToolResultError("Your order manager could not build it: " + doc.Error + ". Nothing was proposed.")
+	case orders.RequestExpired:
+		return mcp.NewToolResultError("Your order manager did not answer within a minute (is it running?). Nothing was proposed.")
+	}
+	return toolText(fmt.Sprintf("Your order manager has not answered yet (request %s): order_list shows the proposal once it does.", r.ID))
+}
