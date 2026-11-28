@@ -119,7 +119,7 @@ func TestAnnotationsSayWhatEachToolDoes(t *testing.T) {
 	s := backend(t, nil)
 	destructive := map[string]bool{"delete_session": true, "close_session": true, "update_session_metadata": true,
 		"workspace_write_file": true, "workspace_delete_file": true, "workspace_stop": true, "workspace_delete": true,
-		"lab_note_write": true, "experiment_save": true, "experiment_register": true, "experiment_decide": true, "vault_push": true, "syndicate_leave": true, "widget_remove": true, "script_remove": true, "alert_delete": true, "chart_remove": true,
+		"lab_note_write": true, "experiment_save": true, "experiment_register": true, "experiment_decide": true, "vault_push": true, "syndicate_leave": true, "widget_remove": true, "script_remove": true, "alert_delete": true, "chart_remove": true, "chart_indicators": true,
 		"order_withdraw": true}
 	writes := map[string]bool{"scaffold_strategy": true, "create_backtest_session": true, "run_backtest_stream": true, "get_session_orders": true, "get_trades": true,
 		"workspace_create": true, "workspace_build": true, "workspace_run": true,

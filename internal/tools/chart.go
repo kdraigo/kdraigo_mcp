@@ -32,6 +32,8 @@ func RegisterChart(s *server.MCPServer, d Deps) {
 	addChartFocus(s, d)
 	addChartReplay(s, d)
 	addChartSnapshot(s, d)
+	addChartIndicatorTypes(s, d)
+	addChartIndicators(s, d)
 }
 
 const (
@@ -95,11 +97,14 @@ type (
 		Name string `json:"name"`
 	}
 	chartScript struct {
+		// ID is its place on the chart (s0…), from a page at level 3.
+		ID      string          `json:"id"`
 		Ref     string          `json:"ref"`
 		Name    string          `json:"name"`
 		Version int64           `json:"version"`
 		Inputs  json.RawMessage `json:"inputs"`
 		Hidden  bool            `json:"hidden"`
+		By      string          `json:"by"`
 	}
 	// chartNow is what the user's chart showed at its last snapshot.
 	chartNow struct {
@@ -127,7 +132,10 @@ type (
 			Series     []chartSeries `json:"series"`
 			Objects    []chartObject `json:"objects"`
 			Scripts    []chartScript `json:"scripts"`
-			Replay     *int64        `json:"replay"`
+			// Indicators and MarketRows come from a page at level 3.
+			Indicators []chartIndicator `json:"indicators"`
+			MarketRows []chartMarketRow `json:"market_rows"`
+			Replay     *int64           `json:"replay"`
 			Price      *float64      `json:"price"`
 			Visible    bool          `json:"visible"`
 			At         time.Time     `json:"at"`
@@ -138,6 +146,8 @@ type (
 		HiddenByReplay int            `json:"hidden_by_replay"`
 		Lab            *chartLab      `json:"lab"`
 		AIDraws        bool           `json:"ai_draws"`
+		// AIIndicators: the user lets the AI set indicators (chart_indicators).
+		AIIndicators bool `json:"ai_indicators"`
 		// Pages is how many of the user's Chart pages are open; with several the
 		// view is one of them, and OtherPages says what the rest show.
 		Pages      int         `json:"pages"`
@@ -392,6 +402,11 @@ func addChartView(s *server.MCPServer, d Deps) {
 		}
 		if read.AIDraws {
 			doc.Line("You can draw on this chart (chart_draw; chart_drawing_types lists the kinds), point at a place or change what it shows (chart_focus), and drive its replay (chart_replay).")
+			if read.AIIndicators {
+				doc.Line("The user lets you set indicators: chart_indicators adds them and changes their settings, by the ids below (chart_indicator_types lists what can be added).")
+			} else {
+				doc.Line("Setting indicators is off: the user switches on \"Let my AI set indicators\" in Share with AI to let you add them (chart_indicators). Until then, suggest them in the chat.")
+			}
 		} else {
 			doc.Line("%s", chartReadOnlyNote(ctx))
 		}
@@ -427,9 +442,30 @@ func addChartView(s *server.MCPServer, d Deps) {
 		if len(without) > 0 {
 			doc.Line("On the chart without values: %s.", strings.Join(without, "; "))
 		}
+		if len(v.Indicators) > 0 || len(v.MarketRows) > 0 {
+			// Each indicator by its id and settings: what chart_indicators changes it by.
+			irows := make([][]string, 0, len(v.Indicators)+len(v.MarketRows))
+			for _, ind := range v.Indicators {
+				state := "on the chart"
+				if ind.Hidden {
+					state = "hidden"
+				}
+				irows = append(irows, []string{ind.ID, ind.Name, settingsText(ind.Inputs), byText(ind.By), state})
+			}
+			for _, m := range v.MarketRows {
+				state := "on the chart"
+				if m.Hidden {
+					state = "hidden"
+				}
+				irows = append(irows, []string{m.ID, m.Name, "—", byText(m.By), state})
+			}
+			doc.Blank()
+			doc.Table("Indicators and market data rows on the chart, by id (its columns above are named as the legend names them)", []string{"id", "name", "settings", "added by", "state"}, irows, nil)
+		}
 		if len(v.Scripts) > 0 {
 			// Which script, exactly: two can share a name, and the chart may
 			// run one with inputs that are not its defaults.
+			ids := v.Scripts[0].ID != ""
 			srows := make([][]string, 0, len(v.Scripts))
 			for _, sc := range v.Scripts {
 				inputs := "the script's defaults"
@@ -444,10 +480,19 @@ func addChartView(s *server.MCPServer, d Deps) {
 				if sc.Version > 0 {
 					version = fmt.Sprint(sc.Version)
 				}
-				srows = append(srows, []string{sc.Ref, orDash(sc.Name), version, inputs, state})
+				row := []string{sc.Ref, orDash(sc.Name), version, inputs, state}
+				if ids {
+					// A page at level 3 names each by its place, and says who added it.
+					row = append([]string{orDash(sc.ID)}, append(row, byText(sc.By))...)
+				}
+				srows = append(srows, row)
+			}
+			header := []string{"script", "name", "version", "inputs set on this chart", "state"}
+			if ids {
+				header = append([]string{"id"}, append(header, "added by")...)
 			}
 			doc.Blank()
-			doc.Table("The user's scripts on the chart (script_open script=<script> version=<version> reads the source the chart runs)", []string{"script", "name", "version", "inputs set on this chart", "state"}, srows, nil)
+			doc.Table("The user's scripts on the chart (script_open script=<script> version=<version> reads the source the chart runs)", header, srows, nil)
 		}
 
 		if len(v.Objects) > 0 {
